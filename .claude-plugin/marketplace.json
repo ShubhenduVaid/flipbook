@@ -1,0 +1,41 @@
+{
+  "name": "shubhenduvaid",
+  "owner": {
+    "name": "Shubhendu Vaid",
+    "url": "https://github.com/ShubhenduVaid"
+  },
+  "description": "Claude Code plugins by Shubhendu Vaid",
+  "plugins": [
+    {
+      "name": "flipbook",
+      "source": "./",
+      "displayName": "Flipbook",
+      "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read: a labelled contact sheet, full-resolution detail frames, and a timeline correlated with the actions that caused each change.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Shubhendu Vaid",
+        "url": "https://github.com/ShubhenduVaid"
+      },
+      "homepage": "https://github.com/ShubhenduVaid/flipbook#readme",
+      "repository": "https://github.com/ShubhenduVaid/flipbook",
+      "license": "MIT",
+      "category": "testing",
+      "keywords": [
+        "browser",
+        "testing",
+        "qa",
+        "screen-recording",
+        "claude-in-chrome",
+        "macos"
+      ],
+      "tags": [
+        "browser",
+        "testing",
+        "qa",
+        "screen-recording",
+        "claude-in-chrome",
+        "macos"
+      ]
+    }
+  ]
+}

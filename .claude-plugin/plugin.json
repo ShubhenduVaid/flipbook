@@ -1,8 +1,23 @@
 {
-  "name": "video-qa",
-  "version": "0.1.0",
-  "description": "Record a browser window while Claude drives it, then turn the recording into budgeted visual evidence (contact sheet, key frames, action-correlated timeline) that Claude can actually read.",
+  "name": "flipbook",
+  "displayName": "Flipbook",
+  "version": "1.0.0",
+  "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read: a labelled contact sheet, full-resolution detail frames, and a timeline correlated with the actions that caused each change.",
   "author": {
-    "name": "Shubhendu Vaid"
-  }
+    "name": "Shubhendu Vaid",
+    "url": "https://github.com/ShubhenduVaid"
+  },
+  "homepage": "https://github.com/ShubhenduVaid/flipbook#readme",
+  "repository": "https://github.com/ShubhenduVaid/flipbook",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "testing",
+    "qa",
+    "screen-recording",
+    "screencapturekit",
+    "claude-in-chrome",
+    "visual-validation",
+    "macos"
+  ]
 }

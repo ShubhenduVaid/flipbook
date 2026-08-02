@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const DATA_HOME = process.env.VIDEO_QA_HOME || path.join(os.homedir(), ".video-qa");
+const DATA_HOME = process.env.FLIPBOOK_HOME || path.join(os.homedir(), ".flipbook");
 const ACTIVE = path.join(DATA_HOME, "active-session");
 
 function readStdin() {

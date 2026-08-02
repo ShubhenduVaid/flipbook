@@ -1,15 +1,27 @@
 {
-  "name": "video-mcp",
-  "version": "0.1.0",
+  "name": "flipbook",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Screen-recording QA for Claude in Chrome: records a browser window and returns budgeted visual evidence the model can actually read.",
+  "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read.",
   "main": "src/server.mjs",
-  "license": "ISC",
+  "license": "MIT",
+  "author": "Shubhendu Vaid",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShubhenduVaid/flipbook.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build:native": "node scripts/build-native.mjs",
     "doctor": "node scripts/doctor-cli.mjs",
-    "test": "node --test test/"
+    "lint:manifests": "node scripts/lint-manifests.mjs",
+    "test": "node --test \"test/unit/*.test.mjs\"",
+    "test:mcp": "node test/mcp-check.mjs",
+    "test:e2e": "node test/fixture-run.mjs --front --seconds 10",
+    "test:e2e:occluded": "node test/fixture-run.mjs --seconds 10"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

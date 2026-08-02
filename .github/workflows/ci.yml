@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: unit tests and manifest lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # ffmpeg-static's postinstall downloads a platform binary that the unit tests
+      # never invoke — they run entirely on synthetic pixel buffers. Skipping scripts
+      # keeps CI fast and offline-safe.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Lint manifests
+        run: npm run lint:manifests
+
+      # Deliberately unit-only. The recording and analysis harnesses need macOS 15+,
+      # Chrome, and a granted Screen Recording permission, none of which exist on a
+      # CI runner; they are documented as local checks in the README instead.
+      - name: Unit tests
+        run: npm test
+
+  swift:
+    name: native recorder compiles
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile sckrec
+        run: |
+          mkdir -p build
+          cp native/sckrec.swift build/main.swift
+          xcrun swiftc -O build/main.swift -o build/sckrec
+          test -x build/sckrec && echo "sckrec compiled"

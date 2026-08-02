@@ -96,9 +96,19 @@ for (const k of sc.keyframes) {
 console.log(`\ncontact sheet: ${sc.contactSheet}`);
 for (const n of sc.notes) console.log(`note: ${n}`);
 
-// The fixture's own schedule, shifted into recording time by the reload offset:
-// spinner 1–3s, panel from 3s, toast 5–6.5s after the reload.
-const shift = (lo, hi) => ({ lo: lo + reloadOffset, hi: hi + reloadOffset });
+// The fixture's own schedule, shifted into recording time by the navigation offset:
+// spinner 1–3s, panel from 3s, toast 5–6.5s after the page loads.
+//
+// TOLERANCE is not slack for a flaky product — it accounts for the offset itself being
+// approximate. It is measured from when the AppleScript navigation call returns, which
+// is not exactly when the page's timers start, so every fixture timestamp carries a few
+// hundred milliseconds of uncertainty. Without it, a slow navigation slides the toast
+// window past a keyframe that did correctly capture the toast.
+const TOLERANCE = 0.6;
+const shift = (lo, hi) => ({
+  lo: lo + reloadOffset - TOLERANCE,
+  hi: hi + reloadOffset + TOLERANCE,
+});
 const windows = [
   { name: "spinner visible", ...shift(1.0, 3.0) },
   { name: "result panel present", ...shift(3.0, 4.5) },

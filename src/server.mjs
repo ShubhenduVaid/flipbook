@@ -12,7 +12,7 @@ import { registerAnalysisTools } from "./tools/analysis-tools.mjs";
 ensureDirs();
 
 const server = new McpServer(
-  { name: "video-qa", version: "0.1.0" },
+  { name: "flipbook", version: "1.0.0" },
   {
     instructions:
       "Records a browser window while Claude drives it, then returns visual evidence " +

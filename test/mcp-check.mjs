@@ -24,7 +24,7 @@ const check = (ok, label, detail = "") => {
 };
 
 const transport = new StdioClientTransport({ command: "node", args: [serverPath] });
-const client = new Client({ name: "video-qa-check", version: "0.1.0" });
+const client = new Client({ name: "flipbook-check", version: "1.0.0" });
 await client.connect(transport);
 console.log("connected to server\n");
 

@@ -18,7 +18,7 @@ export function resolveFfmpeg() {
   if (cached) return cached;
 
   const candidates = [];
-  if (process.env.VIDEO_QA_FFMPEG) candidates.push(process.env.VIDEO_QA_FFMPEG);
+  if (process.env.FLIPBOOK_FFMPEG) candidates.push(process.env.FLIPBOOK_FFMPEG);
   for (const p of ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]) {
     candidates.push(p);
   }

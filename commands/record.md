@@ -1,7 +1,7 @@
 ---
 description: Record the browser while validating a flow, then judge it against a rubric
 argument-hint: <what to validate, e.g. "checkout shows a spinner then a confirmation">
-allowed-tools: mcp__video__doctor, mcp__video__start_recording, mcp__video__stop_recording, mcp__video__mark, mcp__video__get_frames, mcp__video__analyze_recording
+allowed-tools: mcp__plugin_flipbook_rec__doctor, mcp__plugin_flipbook_rec__start_recording, mcp__plugin_flipbook_rec__stop_recording, mcp__plugin_flipbook_rec__mark, mcp__plugin_flipbook_rec__get_frames, mcp__plugin_flipbook_rec__analyze_recording
 ---
 
 Validate this in a real browser by recording it: **$ARGUMENTS**

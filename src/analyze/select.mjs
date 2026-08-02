@@ -139,9 +139,9 @@ export function selectKeyframes(scored, { events = [], maxFrames = 16, opts = DE
   // panel at 3.75s is identical to the final frame at 8s, and keeping the later one
   // discards the only thing worth knowing — when the state was actually reached. The
   // merged reasons still record that the state persisted to the end of the run.
-  // VIDEO_QA_DEBUG_SELECT=1 traces every accept/merge decision to stderr. Threshold
+  // FLIPBOOK_DEBUG_SELECT=1 traces every accept/merge decision to stderr. Threshold
   // tuning is unreadable without it, and stderr is safe under the stdio transport.
-  const debug = process.env.VIDEO_QA_DEBUG_SELECT
+  const debug = process.env.FLIPBOOK_DEBUG_SELECT
     ? (msg) => console.error(`[select] ${msg}`)
     : () => {};
 
