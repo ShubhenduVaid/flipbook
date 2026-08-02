@@ -1,0 +1,8 @@
+{
+  "name": "video-qa",
+  "version": "0.1.0",
+  "description": "Record a browser window while Claude drives it, then turn the recording into budgeted visual evidence (contact sheet, key frames, action-correlated timeline) that Claude can actually read.",
+  "author": {
+    "name": "Shubhendu Vaid"
+  }
+}
