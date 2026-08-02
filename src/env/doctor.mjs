@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
-import { resolveFfmpeg, capabilities, listAvfDevices } from "./ffmpeg.mjs";
+import { resolveFfmpeg, capabilities, listAvfDevices, repairBundledFfmpeg } from "./ffmpeg.mjs";
 import { hasSwift, buildNative, listWindows, BINARY } from "./native.mjs";
 import { DATA_HOME } from "./paths.mjs";
 
@@ -33,14 +33,25 @@ async function checkMacOS() {
 
 async function checkFfmpeg() {
   let bin;
+  let repaired = false;
   try {
     bin = resolveFfmpeg();
-  } catch (err) {
-    // resolveFfmpeg already tailors its message to why it failed, so a fixed
-    // "brew install ffmpeg" hint here would contradict the specific fix it names.
-    return [bad("ffmpeg", err.message)];
+  } catch {
+    // A marketplace install leaves ffmpeg-static without its binary, because plugin
+    // dependencies are installed with --ignore-scripts. That is the expected state on
+    // first run, not a user error, so repair it here rather than reporting a failure
+    // the user has to go and fix by hand in the plugin cache.
+    const repair = await repairBundledFfmpeg();
+    repaired = repair.attempted && repair.ok;
+    try {
+      bin = resolveFfmpeg();
+    } catch (err) {
+      // resolveFfmpeg tailors its message to why it failed, so a fixed
+      // "brew install ffmpeg" hint here would contradict the specific fix it names.
+      return [bad("ffmpeg", err.message)];
+    }
   }
-  const results = [ok("ffmpeg", bin)];
+  const results = [ok("ffmpeg", `${bin}${repaired ? " (bundled binary just restored)" : ""}`)];
   try {
     const caps = await capabilities();
     const missing = ["scale", "crop", "tile", "drawtext", "drawbox", "select"].filter(
