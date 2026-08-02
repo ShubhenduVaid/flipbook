@@ -55,27 +55,29 @@ claude plugin marketplace add ShubhenduVaid/flipbook
 claude plugin install flipbook@shubhenduvaid
 ```
 
-Then, once per machine:
+Then start Claude with `claude --chrome` and ask it to **run `doctor`**. That finishes
+setup on first run: it compiles the ScreenCaptureKit recorder and restores the bundled
+ffmpeg binary, which Claude Code's installer skips because it installs plugin dependencies
+with `--ignore-scripts`.
 
-```bash
-# In the installed plugin directory, or a clone:
-npm install          # ffmpeg-static + MCP SDK
-npm run build:native # compiles the ScreenCaptureKit recorder (needs Xcode CLT)
-npm run doctor       # preflight every prerequisite
-```
-
-**Grant Screen Recording** to your terminal in System Settings → Privacy & Security →
-Screen & System Audio Recording, then restart it. Without this, macOS records a blank
-screen instead of erroring — `doctor` detects it explicitly.
+The one thing `doctor` can't do for you: **grant Screen Recording** to your terminal in
+System Settings → Privacy & Security → Screen & System Audio Recording, then restart it.
+Without it macOS records a blank screen rather than erroring, so `doctor` checks for it
+explicitly.
 
 Requirements: macOS 15+ (window capture uses ScreenCaptureKit), Node 22+, Xcode Command
 Line Tools (`xcode-select --install`), and Google Chrome.
 
 <details>
-<summary>Try it without installing</summary>
+<summary>Run from a clone instead</summary>
 
 ```bash
-claude --chrome --plugin-dir /path/to/flipbook
+git clone https://github.com/ShubhenduVaid/flipbook && cd flipbook
+npm install
+npm run build:native   # compiles the ScreenCaptureKit recorder
+npm run doctor         # preflight every prerequisite
+
+claude --chrome --plugin-dir "$PWD"
 ```
 
 `--plugin-dir` loads the plugin for one session only.
