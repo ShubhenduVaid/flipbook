@@ -36,7 +36,9 @@ async function checkFfmpeg() {
   try {
     bin = resolveFfmpeg();
   } catch (err) {
-    return [bad("ffmpeg", err.message, "brew install ffmpeg")];
+    // resolveFfmpeg already tailors its message to why it failed, so a fixed
+    // "brew install ffmpeg" hint here would contradict the specific fix it names.
+    return [bad("ffmpeg", err.message)];
   }
   const results = [ok("ffmpeg", bin)];
   try {

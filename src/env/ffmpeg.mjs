@@ -22,8 +22,10 @@ export function resolveFfmpeg() {
   for (const p of ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]) {
     candidates.push(p);
   }
+  let staticInstalled = false;
   try {
     candidates.push(require("ffmpeg-static"));
+    staticInstalled = true;
   } catch {
     /* not installed */
   }
@@ -34,9 +36,20 @@ export function resolveFfmpeg() {
       return c;
     }
   }
+
+  // "run npm install" is the wrong advice in the most confusing case. ffmpeg-static
+  // fetches its binary in a postinstall script, so installing with --ignore-scripts
+  // leaves the package present but the binary absent — and npm then considers the
+  // dependency satisfied and will not re-run the script. Only `npm rebuild` recovers it.
   throw new Error(
-    "No ffmpeg found. Install it with `brew install ffmpeg`, or run `npm install` " +
-      "in the plugin directory to get the bundled ffmpeg-static build."
+    "No ffmpeg found. " +
+      (staticInstalled
+        ? "The bundled ffmpeg-static package is installed but its binary is missing, " +
+          "which is what happens when dependencies were installed with --ignore-scripts. " +
+          "Run `npm rebuild ffmpeg-static` in the plugin directory"
+        : "Run `npm install` in the plugin directory to get the bundled build") +
+      ", or install a system ffmpeg with `brew install ffmpeg`. " +
+      "You can also point FLIPBOOK_FFMPEG at an existing binary."
   );
 }
 
