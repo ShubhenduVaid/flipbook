@@ -9,6 +9,7 @@ import { planImages, estimateTokens, allocateText, clampText } from "./budget.mj
 import { buildTimeline, fitTimeline } from "./timeline.mjs";
 import { buildSegments, formatSegments, segmentNotes } from "./segments.mjs";
 import { findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote } from "./anomaly.mjs";
+import { framingHint } from "./roi.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -89,6 +90,12 @@ export async function analyzeVideo({
   ];
   for (const j of geometryJumps) notes.push(geometryNote(j));
   if (flatOnset) notes.push(flatOnsetNote(flatOnset));
+
+  // When the subject occupies a sliver of the frame, say which sliver. A recording that
+  // cannot settle a question because the subject is a few pixels across is the other
+  // half of the reported waste, and it is knowable at analysis time.
+  const hint = framingHint(scored, { info });
+  if (hint) notes.push(hint);
 
   const aspect = info.width && info.height ? info.width / info.height : 1.5;
   const sheet = await buildContactSheet(video, keyframes, outDir, { videoAspect: aspect });
