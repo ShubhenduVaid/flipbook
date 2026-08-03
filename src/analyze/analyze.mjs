@@ -6,7 +6,7 @@ import { scoreFrames } from "./delta.mjs";
 import { selectKeyframes, DEFAULTS } from "./select.mjs";
 import { buildContactSheet } from "./sheet.mjs";
 import { planImages, estimateTokens, allocateText, clampText } from "./budget.mjs";
-import { buildTimeline, formatTimeline } from "./timeline.mjs";
+import { buildTimeline, fitTimeline } from "./timeline.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -102,8 +102,7 @@ export async function analyzeVideo({
     detailFiles.push({ ...f, path: fitted.path, bytes: fitted.bytes });
   }
 
-  const rows = buildTimeline({ scored, events, keyframes });
-  const timelineText = formatTimeline(rows, { sampleFps });
+  const timeline = buildTimeline({ scored, events, keyframes });
 
   // ---- assemble the response -------------------------------------------------
   //
@@ -147,11 +146,14 @@ export async function analyzeVideo({
     budget.header,
     "header trimmed to fit the MCP output budget; the rubric above may be incomplete."
   );
-  const fittedTimeline = clampText(
-    timelineText,
-    budget.timeline,
-    "timeline trimmed to fit the MCP output budget. Use get_frames with a time range to inspect any period in full."
-  );
+  // Whole rows, never a slice. `clampText` cuts from the end, and rows are in time
+  // order, so it deleted the end of the recording — taking any mark placed late in the
+  // run with it while every tool call before it survived.
+  const fittedTimeline = fitTimeline(timeline.rows, {
+    sampleFps,
+    maxChars: budget.timeline,
+    alreadyDropped: timeline.dropped,
+  });
 
   const content = [];
   content.push({ type: "text", text: fittedHeader.text });
@@ -199,6 +201,9 @@ export async function analyzeVideo({
     }),
     tokenCeiling: plan.ceiling,
     timelineTruncated: fittedTimeline.truncated,
+    timelineRowsShown: fittedTimeline.rowsShown,
+    timelineRowsTotal: fittedTimeline.rowsTotal,
+    timelineDropped: fittedTimeline.dropped,
     headerTruncated: fittedHeader.truncated,
   };
 
