@@ -1,4 +1,5 @@
 import { SAMPLE_W, SAMPLE_H } from "./frames.mjs";
+import { resizeGray } from "./delta.mjs";
 
 /**
  * Finding the part of the frame worth spending pixels on.
@@ -138,6 +139,140 @@ export function roiPixels(rect, { width, height }) {
     w: Math.round(rect.w * width),
     h: Math.round(rect.h * height),
   };
+}
+
+/**
+ * What `roi: "auto"` resolves to, or a reasoned refusal.
+ *
+ * A box covering most of the frame means the change is spread across the page, and
+ * cropping to it would discard context for no gain in resolution — so it declines
+ * rather than performing a crop that buys nothing.
+ */
+export function autoRoi(scored, { info = {}, opts = ROI_DEFAULTS } = {}) {
+  const box = changeBox(scored, opts);
+  if (!box.found || box.pairs < opts.minHitPairs) {
+    return { applied: false, rect: null, areaFraction: 0, reason: "nothing changed enough to frame on" };
+  }
+  const rect = padBox(box, info, opts);
+  if (rect.w * rect.h > opts.maxAreaFraction) {
+    return {
+      applied: false,
+      rect: null,
+      areaFraction: box.rawAreaFraction,
+      reason:
+        `the pixels that changed span ${Math.round(rect.w * rect.h * 100)}% of the frame, so ` +
+        `cropping to them would lose context without gaining resolution`,
+    };
+  }
+  return {
+    applied: true,
+    rect,
+    areaFraction: box.rawAreaFraction,
+    reason: `changed pixels occupied ${(box.rawAreaFraction * 100).toFixed(1)}% of the frame`,
+  };
+}
+
+/** Validate and clamp a caller-supplied fractional rect. Throws with an actionable message. */
+export function normalizeRoi(roi) {
+  if (roi == null) return null;
+  if (roi === "auto") return "auto";
+  const need = ["x", "y", "w", "h"];
+  if (typeof roi !== "object") {
+    throw new Error(`roi must be "auto" or an object with x, y, w and h — got ${typeof roi}`);
+  }
+  for (const k of need) {
+    const v = roi[k];
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      throw new Error(`roi.${k} must be a number between 0 and 1 (a fraction of the frame)`);
+    }
+    if (v < 0 || v > 1) {
+      throw new Error(`roi.${k} is ${v}; it must be a fraction of the frame between 0 and 1`);
+    }
+  }
+  if (roi.w <= 0 || roi.h <= 0) throw new Error("roi.w and roi.h must be greater than 0");
+
+  // Clamp rather than reject: a rect running a little past the edge is a rounding slip,
+  // not a mistake worth failing a whole analysis over.
+  const x = Math.min(roi.x, 1);
+  const y = Math.min(roi.y, 1);
+  return {
+    x: round4(x),
+    y: round4(y),
+    w: round4(Math.min(roi.w, 1 - x)),
+    h: round4(Math.min(roi.h, 1 - y)),
+  };
+}
+
+/**
+ * The one place a crop filter string is built.
+ *
+ * Every consumer — the sampler, the still extractor and the contact-sheet cells — takes
+ * this exact string, for the same reason `longEdgeScale` exists: three hand-rolled crops
+ * are three chances to disagree about what "the region" means.
+ *
+ * Returns null when the source dimensions are unknown, and the caller must refuse rather
+ * than carry on uncropped: a full frame under a "CROPPED VIEW" header is worse than an
+ * error.
+ */
+export function cropFilter(rect, { width, height } = {}) {
+  if (!width || !height || !rect) return null;
+  const even = (n) => Math.max(2, n - (n % 2));
+  const w = Math.min(even(Math.round(rect.w * width)), even(width));
+  const h = Math.min(even(Math.round(rect.h * height)), even(height));
+  let x = Math.round(rect.x * width);
+  let y = Math.round(rect.y * height);
+  // An out-of-range x or y is a hard ffmpeg error, not a warning.
+  x = Math.max(0, Math.min(x - (x % 2), width - w));
+  y = Math.max(0, Math.min(y - (y % 2), height - h));
+  return `crop=${w}:${h}:${x}:${y}`;
+}
+
+/** One sentence naming exactly what is, and is not, visible in the images. */
+export function describeRoi(rect, info = {}) {
+  const px = roiPixels(rect, info);
+  const size = px
+    ? `a ${px.w}x${px.h} px region at (${px.x},${px.y}) of the ${info.width}x${info.height} frame`
+    : "a sub-region of the frame";
+  return (
+    `CROPPED VIEW — every image below shows only ${size} ` +
+    `(${Math.round(rect.w * 100)}% x ${Math.round(rect.h * 100)}% of it). The rest of the page ` +
+    `is NOT visible in any image below, so its absence is not evidence of anything. Re-run ` +
+    `without \`roi\` to see the whole window.`
+  );
+}
+
+/** Short marker for image captions, where the full sentence would not fit. */
+export function roiCaptionTag(rect, info = {}) {
+  const px = roiPixels(rect, info);
+  return px
+    ? `[CROP ${px.w}x${px.h} @ ${px.x},${px.y}]`
+    : `[CROP ${Math.round(rect.w * 100)}%x${Math.round(rect.h * 100)}%]`;
+}
+
+/**
+ * Extract the rect from a 128x128 sample buffer and stretch it back to 128x128.
+ *
+ * Upsampling adds no information, and that is not the point — keeping the buffer at its
+ * documented size is. `scoreFrames`, `samePicture`, `dHash` and `peakBlockDiff` all take
+ * SAMPLE_W/SAMPLE_H as defaults, so a natural-sized sub-rect would read past the end of
+ * the buffer and silently return NaN deltas, disabling dedupe.
+ *
+ * The gain is sensitivity: `mad` and `changedFraction` normalise by buffer length, so a
+ * spinner occupying 0.3% of the full frame occupies ~8% of the cropped one.
+ */
+export function cropPixelsToSample(pixels, rect) {
+  const x0 = Math.max(0, Math.min(SAMPLE_W - 1, Math.floor(rect.x * SAMPLE_W)));
+  const y0 = Math.max(0, Math.min(SAMPLE_H - 1, Math.floor(rect.y * SAMPLE_H)));
+  const w = Math.max(1, Math.min(SAMPLE_W - x0, Math.round(rect.w * SAMPLE_W)));
+  const h = Math.max(1, Math.min(SAMPLE_H - y0, Math.round(rect.h * SAMPLE_H)));
+
+  const sub = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      sub[y * w + x] = pixels[(y0 + y) * SAMPLE_W + (x0 + x)];
+    }
+  }
+  return resizeGray(sub, w, h, SAMPLE_W, SAMPLE_H);
 }
 
 /**

@@ -134,3 +134,20 @@ test("both notes name their timestamp, explain the cause, and state no verdict",
   assert.match(geometry, /fullscreen player|deliberately resized/, "and admits the benign case");
   assert.match(flat, /stopped painting/);
 });
+
+// Caught by running the real pipeline over a synthetic recording: a wholly uniform
+// frame has no content box, and its all-zero sentinel read as an enormous edge shift
+// the moment anything at all appeared — so every blink of a small badge on a plain
+// background was reported as a capture fault.
+test("content appearing on a wholly uniform frame is not a geometry change", () => {
+  const blank = blankFrame(32);
+  const badge = contentIn({ x: 54, y: 43, w: 9, h: 6 }, { surround: 32 });
+  const frames = [...repeat(blank, 4), ...repeat(badge, 6)];
+
+  assert.deepEqual(findGeometryJumps(scoredFrom(frames)), [], "there was no geometry to change");
+});
+
+test("contentBox flags a featureless frame rather than reporting a zero-size box", () => {
+  assert.equal(contentBox(blankFrame(32)).empty, true);
+  assert.equal(contentBox(texturedFrame(2)).empty, false);
+});

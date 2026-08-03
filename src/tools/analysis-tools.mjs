@@ -9,6 +9,8 @@ import { sampleGrayFrames, extractFrame, fitToBytes, videoInfo, readAsBase64 } f
 import { scoreFrames } from "../analyze/delta.mjs";
 import { selectKeyframes } from "../analyze/select.mjs";
 import { planImages } from "../analyze/budget.mjs";
+import { normalizeRoi, cropFilter, roiCaptionTag, describeRoi } from "../analyze/roi.mjs";
+import { roiSchema } from "./schemas.mjs";
 
 /** Both tools accept either a stored session or an arbitrary file on disk. */
 async function resolveSource({ session_id, path: inputPath }) {
@@ -57,6 +59,7 @@ export function registerAnalysisTools(server) {
         focus: z.string().optional().describe("What to pay attention to, e.g. 'the checkout panel'."),
         sample_fps: z.number().min(0.5).max(15).optional().describe("Analysis sampling rate (default 4)."),
         return_mode: z.enum(["inline", "paths"]).optional().describe("inline (default) embeds images; paths returns file paths."),
+        roi: roiSchema,
       },
     },
     async (args) => {
@@ -80,6 +83,7 @@ export function registerAnalysisTools(server) {
           outDir: src.outDir,
           label: src.meta?.label ?? null,
           focus: args.focus ?? null,
+          roi: args.roi ?? null,
         });
         if (src.note) {
           analysis.content.unshift({ type: "text", text: `NOTE: ${src.note}` });
@@ -108,6 +112,7 @@ export function registerAnalysisTools(server) {
         to: z.number().min(0).optional().describe("Range end in seconds."),
         max_images: z.number().int().min(1).max(7).optional().describe("How many frames to return (default 4)."),
         return_mode: z.enum(["inline", "paths"]).optional().describe("inline (default) embeds images; paths returns file paths."),
+        roi: roiSchema,
       },
     },
     async (args) => {
@@ -124,6 +129,31 @@ export function registerAnalysisTools(server) {
       const info = await videoInfo(src.video);
       const outDir = path.join(src.outDir, "drilldown");
       fs.mkdirSync(outDir, { recursive: true });
+
+      let roiRect = null;
+      try {
+        const requested = normalizeRoi(args.roi ?? null);
+        if (requested === "auto") {
+          // Deliberately not supported here. "auto" is derived from what changed across
+          // a whole recording; asking for it while drilling into three frames would
+          // silently answer a different question.
+          throw new Error(
+            'roi:"auto" needs a whole recording to derive a region from. Call ' +
+              "analyze_recording with roi:\"auto\" to get the region, then pass that " +
+              "explicit rect here."
+          );
+        }
+        if (requested && !info.width) {
+          throw new Error(
+            "roi was requested but the frame size of this recording could not be read, " +
+              "so there is nothing to crop against. Re-run without roi."
+          );
+        }
+        roiRect = requested;
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      const roiFilter = roiRect ? cropFilter(roiRect, info) : null;
 
       let picks = [];
       let how = "";
@@ -151,14 +181,19 @@ export function registerAnalysisTools(server) {
         type: "text",
         text:
           `FULL-RESOLUTION FRAMES — ${how} from ${path.basename(src.video)}` +
+          (roiRect ? `\n${describeRoi(roiRect, info)}` : "") +
           (src.note ? `\nNOTE: ${src.note}` : ""),
       }];
 
+      const cropTag = roiRect ? `${roiCaptionTag(roiRect, info)} ` : "";
       const produced = [];
       for (const p of picks) {
-        const file = path.join(outDir, `at-${p.t.toFixed(2).replace(".", "_")}s.jpg`);
+        // The crop is part of the identity of the file: without it, drilling into the
+        // same moment cropped and uncropped would overwrite one with the other.
+        const suffix = roiRect ? `-crop${Math.round(roiRect.x * 100)}_${Math.round(roiRect.y * 100)}` : "";
+        const file = path.join(outDir, `at-${p.t.toFixed(2).replace(".", "_")}s${suffix}.jpg`);
         try {
-          await extractFrame(src.video, p.t, file, { maxLongEdge: 1456, quality: 2 });
+          await extractFrame(src.video, p.t, file, { maxLongEdge: 1456, quality: 2, roiFilter });
         } catch (err) {
           content.push({ type: "text", text: `t=${p.t.toFixed(2)}s — could not extract: ${err.message}` });
           continue;
@@ -166,7 +201,7 @@ export function registerAnalysisTools(server) {
         const fitted = await fitToBytes(file, { maxLongEdge: 1456 });
         content.push({
           type: "text",
-          text: `t=${p.t.toFixed(2)}s${p.reasons ? ` · ${p.reasons.join(", ")}` : ""}`,
+          text: `${cropTag}t=${p.t.toFixed(2)}s${p.reasons ? ` · ${p.reasons.join(", ")}` : ""}`,
         });
         content.push(
           returnMode === "paths"
@@ -178,7 +213,12 @@ export function registerAnalysisTools(server) {
 
       return {
         content,
-        structuredContent: { video: src.video, frames: produced, durationSec: info.duration },
+        structuredContent: {
+          video: src.video,
+          frames: produced,
+          durationSec: info.duration,
+          roi: { applied: Boolean(roiRect), rect: roiRect },
+        },
       };
     }
   );

@@ -31,13 +31,21 @@ function esc(text) {
  * in text, because a grid of unlabelled thumbnails is unusable to the model — it can
  * see something changed but cannot say when.
  */
-async function renderCell(video, frame, outPath, { cellW, cellH, ordinal }) {
+async function renderCell(video, frame, outPath, { cellW, cellH, ordinal, roiFilter = null }) {
   const font = resolveFont();
-  const filters = [`scale=${cellW}:${cellH}:force_original_aspect_ratio=decrease`,
-                   `pad=${cellW}:${cellH}:(ow-iw)/2:(oh-ih)/2:color=0x101010`];
+  const filters = [];
+  if (roiFilter) filters.push(roiFilter); // before the scale, as everywhere else
+  filters.push(`scale=${cellW}:${cellH}:force_original_aspect_ratio=decrease`,
+               `pad=${cellW}:${cellH}:(ow-iw)/2:(oh-ih)/2:color=0x101010`);
 
   if (frame.anomalous) {
     filters.push(`drawbox=x=0:y=0:w=iw:h=ih:color=0xE5484D@0.95:t=5`);
+  }
+  // Amber, deliberately not the red of the anomaly box. A cropped cell that reads as a
+  // whole page is the failure this batch's capture detectors exist to catch, so the
+  // crop is stated in the pixels as well as in the header and the caption.
+  if (roiFilter) {
+    filters.push(`drawbox=x=0:y=0:w=iw:h=ih:color=0xF5A623@0.9:t=3`);
   }
   if (font) {
     // Clamped rather than purely proportional: a two-cell sheet has enormous cells,
@@ -56,6 +64,12 @@ async function renderCell(video, frame, outPath, { cellW, cellH, ordinal }) {
       filters.push(
         `drawtext=fontfile=${font}:text='${why}':fontcolor=0xC9D1D9:fontsize=${whySize}` +
           `:box=1:boxcolor=0x000000@0.6:boxborderw=4:x=10:y=h-th-10`
+      );
+    }
+    if (roiFilter) {
+      filters.push(
+        `drawtext=fontfile=${font}:text='CROP':fontcolor=0xF5A623:fontsize=${whySize}` +
+          `:box=1:boxcolor=0x000000@0.7:boxborderw=4:x=w-tw-10:y=10`
       );
     }
   }
@@ -90,6 +104,7 @@ export async function buildContactSheet(video, frames, outDir, {
   targetWidth = 1456,
   videoAspect = 1.5,
   padding = 6,
+  roiFilter = null,
 } = {}) {
   if (!frames.length) return null;
   fs.mkdirSync(outDir, { recursive: true });
@@ -112,6 +127,7 @@ export async function buildContactSheet(video, frames, outDir, {
       cellW,
       cellH,
       ordinal: i + 1,
+      roiFilter,
     });
   }
   // tile expects a full grid; without filler the last row can be dropped entirely.

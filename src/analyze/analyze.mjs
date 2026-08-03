@@ -9,7 +9,10 @@ import { planImages, estimateTokens, allocateText, clampText } from "./budget.mj
 import { buildTimeline, fitTimeline } from "./timeline.mjs";
 import { buildSegments, formatSegments, segmentNotes } from "./segments.mjs";
 import { findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote } from "./anomaly.mjs";
-import { framingHint } from "./roi.mjs";
+import {
+  framingHint, autoRoi, normalizeRoi, cropFilter, cropPixelsToSample, describeRoi,
+  roiCaptionTag, roiPixels,
+} from "./roi.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -32,6 +35,7 @@ export async function analyzeVideo({
   outDir,
   label = null,
   focus = null,
+  roi = null,
 }) {
   if (!fs.existsSync(video)) throw new Error(`recording not found: ${video}`);
   fs.mkdirSync(outDir, { recursive: true });
@@ -40,13 +44,45 @@ export async function analyzeVideo({
   const duration = info.duration ?? 0;
   const rangeTo = to != null ? Math.min(to, duration || to) : null;
 
+  const requestedRoi = normalizeRoi(roi);
+  if (requestedRoi && !info.width) {
+    // Refuse rather than quietly skip the crop: full frames under a "CROPPED VIEW"
+    // header would be worse than no answer at all.
+    throw new Error(
+      `roi was requested but the frame size of ${path.basename(video)} could not be read, ` +
+        `so there is nothing to crop against. Re-run without roi.`
+    );
+  }
+
+  // Always sample the whole frame once. The capture-integrity detectors have to see the
+  // whole window — a viewport that shrank into a corner is invisible once the corner is
+  // all that is left — and `roi: "auto"` needs the full frame to find its region at all.
   const raw = await sampleGrayFrames(video, { sampleFps, from, to: rangeTo });
   if (!raw.length) {
     throw new Error(
       `no frames could be decoded from ${video} — the file may be empty or corrupt`
     );
   }
-  const scored = scoreFrames(raw);
+  const scoredFull = scoreFrames(raw);
+
+  const roiState = resolveRoi(requestedRoi, scoredFull, info);
+  const roiFilter = roiState.applied ? cropFilter(roiState.rect, info) : null;
+
+  // Re-score on the region rather than decoding a second time. The buffers are stretched
+  // back to the sampling size so every downstream default (dHash, peakBlockDiff,
+  // samePicture) still holds; the gain is sensitivity, since both change scores are
+  // normalised by buffer length. This improves which frames get picked, not how they
+  // look — the stills themselves are always extracted from the source at full
+  // resolution, through the same crop filter.
+  const scored = roiState.applied
+    ? scoreFrames(
+        scoredFull.map((s) => ({
+          index: s.index,
+          t: s.t,
+          pixels: cropPixelsToSample(s.pixels, roiState.rect),
+        }))
+      )
+    : scoredFull;
 
   const plan = planImages({ maxImages });
   const { frames: keyframes, transitions, notes } = selectKeyframes(scored, {
@@ -61,8 +97,10 @@ export async function analyzeVideo({
   // shows only static browser chrome. Verified directly — the identical flow recorded
   // blank while a second browser window sat on top of the target, and recorded
   // perfectly once the target was moved clear.
+  // Measured on the whole window: this is a question about the capture, not about the
+  // region the caller chose to look at.
   const actionCount = events.filter((e) => e.type === "tool").length;
-  const maxDelta = scored.reduce((m, s) => Math.max(m, s.delta), 0);
+  const maxDelta = scoredFull.reduce((m, s) => Math.max(m, s.delta), 0);
   if (actionCount > 0 && maxDelta < 0.05) {
     notes.push(
       `${actionCount} browser action(s) were recorded but the window barely changed ` +
@@ -82,8 +120,8 @@ export async function analyzeVideo({
   // Did the capture stop being about the app partway through? Both detectors must see
   // the whole frame, so they run before any region of interest is applied — a viewport
   // that shrank into a corner is invisible once the corner is all that is left.
-  const geometryJumps = findGeometryJumps(scored);
-  const flatOnset = findFlatOnset(scored, { sampleFps });
+  const geometryJumps = findGeometryJumps(scoredFull);
+  const flatOnset = findFlatOnset(scoredFull, { sampleFps });
   const anomalies = [
     ...geometryJumps.map((j) => ({ type: "geometry-change", t: j.t, detail: j })),
     ...(flatOnset ? [{ type: "flat-onset", t: flatOnset.t, detail: flatOnset }] : []),
@@ -94,11 +132,21 @@ export async function analyzeVideo({
   // When the subject occupies a sliver of the frame, say which sliver. A recording that
   // cannot settle a question because the subject is a few pixels across is the other
   // half of the reported waste, and it is knowable at analysis time.
-  const hint = framingHint(scored, { info });
+  const hint = roiState.applied ? null : framingHint(scoredFull, { info });
   if (hint) notes.push(hint);
+  if (requestedRoi === "auto" && !roiState.applied) {
+    notes.push(`roi:"auto" did not crop: ${roiState.reason}. The images below show the whole window.`);
+  }
 
-  const aspect = info.width && info.height ? info.width / info.height : 1.5;
-  const sheet = await buildContactSheet(video, keyframes, outDir, { videoAspect: aspect });
+  // The cell aspect has to follow the crop, or every cell gets pillarbox bars around a
+  // correctly-cropped image.
+  const effW = info.width ? info.width * (roiState.applied ? roiState.rect.w : 1) : null;
+  const effH = info.height ? info.height * (roiState.applied ? roiState.rect.h : 1) : null;
+  const aspect = effW && effH ? effW / effH : 1.5;
+  const sheet = await buildContactSheet(video, keyframes, outDir, {
+    videoAspect: aspect,
+    roiFilter,
+  });
 
   // The end state matters most for validation, so it is always one of the detail
   // frames; the rest go to the highest-scoring distinct moments.
@@ -123,7 +171,7 @@ export async function analyzeVideo({
   const detailFiles = [];
   for (const f of detailPicks) {
     const p = path.join(outDir, `frame-${f.t.toFixed(2).replace(".", "_")}s.jpg`);
-    await extractFrame(video, f.t, p, { maxLongEdge: DETAIL_LONG_EDGE, quality: 3 });
+    await extractFrame(video, f.t, p, { maxLongEdge: DETAIL_LONG_EDGE, quality: 3, roiFilter });
     const fitted = await fitToBytes(p, { maxLongEdge: DETAIL_LONG_EDGE });
     detailFiles.push({ ...f, path: fitted.path, bytes: fitted.bytes });
   }
@@ -140,15 +188,20 @@ export async function analyzeVideo({
   // token ceiling.
   const imageCount = (sheet ? 1 : 0) + detailFiles.length;
 
+  const cropTag = roiState.applied ? `${roiCaptionTag(roiState.rect, info)} ` : "";
+
   const sheetCaption = sheet
-    ? `CONTACT SHEET — ${sheet.count} keyframes, ${sheet.cols}x${sheet.rows}, read left to ` +
-      `right then top to bottom. Each cell is labelled with its frame number and ` +
-      `timestamp; red-outlined cells are the largest visual changes.`
+    ? `${cropTag}CONTACT SHEET — ${sheet.count} keyframes, ${sheet.cols}x${sheet.rows}, read ` +
+      `left to right then top to bottom. Each cell is labelled with its frame number and ` +
+      `timestamp; red-outlined cells are the largest visual changes` +
+      (roiState.applied
+        ? `, and the amber border marks every cell as a crop, not the whole window.`
+        : `.`)
     : null;
 
   const detailCaptions = detailFiles.map(
     (f, i) =>
-      `DETAIL ${i + 1}/${detailFiles.length} — t=${f.t.toFixed(2)}s · ` +
+      `${cropTag}DETAIL ${i + 1}/${detailFiles.length} — t=${f.t.toFixed(2)}s · ` +
       `change=${f.delta.toFixed(3)} · selected because: ${f.reasons.join(", ")}`
   );
 
@@ -158,7 +211,7 @@ export async function analyzeVideo({
 
   const header = buildHeader({
     video, label, info, from, to: rangeTo, keyframes, transitions,
-    events, rubric, focus, notes, sheet, detailFiles, plan, segments,
+    events, rubric, focus, notes, sheet, detailFiles, plan, segments, roiState,
   });
 
   const fixedChars =
@@ -220,6 +273,15 @@ export async function analyzeVideo({
     transitionCount: transitions.length,
     segments,
     anomalies,
+    // Always present, applied or not: an absent field could be read as "uncropped".
+    roi: {
+      mode: roiState.mode,
+      applied: roiState.applied,
+      rect: roiState.rect,
+      sourcePixels: roiState.applied ? roiPixels(roiState.rect, info) : null,
+      frame: { width: info.width, height: info.height },
+      reason: roiState.reason,
+    },
     events: events.map((e) => ({ t: e.t, type: e.type, tool: e.tool, note: e.note })),
     notes,
     estimatedTokens: estimateTokens({
@@ -238,6 +300,26 @@ export async function analyzeVideo({
   return { content, structuredContent };
 }
 
+/**
+ * Turn the requested `roi` into a decision, in one place.
+ *
+ * Always returns an object with `applied`, so a caller reading `structuredContent.roi`
+ * can never mistake an absent field for "these images show the whole window".
+ */
+function resolveRoi(requested, scoredFull, info) {
+  if (!requested) return { mode: null, applied: false, rect: null, reason: "no roi requested" };
+  if (requested === "auto") {
+    const auto = autoRoi(scoredFull, { info });
+    return { mode: "auto", applied: auto.applied, rect: auto.rect, reason: auto.reason };
+  }
+  return {
+    mode: "explicit",
+    applied: true,
+    rect: requested,
+    reason: "region supplied by the caller",
+  };
+}
+
 function imageContent(p, returnMode) {
   if (returnMode === "paths") {
     return {
@@ -250,7 +332,7 @@ function imageContent(p, returnMode) {
 
 function buildHeader({
   video, label, info, from, to, keyframes, transitions, events, rubric, focus, notes, sheet,
-  detailFiles, plan, segments = [],
+  detailFiles, plan, segments = [], roiState = null,
 }) {
   const lines = [];
   lines.push(`RECORDING ANALYSIS${label ? ` — ${label}` : ""}`);
@@ -259,6 +341,13 @@ function buildHeader({
       `${info.duration ? info.duration.toFixed(2) + "s" : "unknown length"}` +
       (from || to ? ` · analysed ${from.toFixed(2)}s–${(to ?? info.duration ?? 0).toFixed(2)}s` : "")
   );
+  // Immediately after the dimensions and before everything variable-length, so it is the
+  // one thing that cannot be pushed out of the header by a long rubric.
+  if (roiState?.applied) {
+    lines.push("");
+    lines.push(describeRoi(roiState.rect, info));
+    lines.push("");
+  }
   lines.push(
     `${keyframes.length} keyframes selected from ${transitions.length} visual transitions · ` +
       `${events.length} recorded action(s) · ` +

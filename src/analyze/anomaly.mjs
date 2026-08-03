@@ -23,6 +23,7 @@ export const ANOMALY_DEFAULTS = {
   borderOnsetAfter: 0.25, // border must reach at least this much of the frame…
   borderOnsetBefore: 0.1, // …from under this much before
   boxJump: 0.15, // or a content edge must move this fraction of the frame
+  minPaintedBefore: 0.05, // there must have been a painted area for its geometry to change
   stableBefore: 2, // samples of settled geometry required beforehand
   persistAfter: 3, // samples the new geometry must hold
   persistTolerance: 0.03,
@@ -87,7 +88,7 @@ export function contentBox(pixels, opts = ANOMALY_DEFAULTS) {
   const y1 = empty ? 0 : (bottom + 1) / h;
   const boxFraction = Math.max(0, (x1 - x0) * (y1 - y0));
 
-  return { x0, y0, x1, y1, boxFraction, borderFraction: 1 - boxFraction, borderValue };
+  return { x0, y0, x1, y1, boxFraction, borderFraction: 1 - boxFraction, borderValue, empty };
 }
 
 function edgesSettled(boxes, from, count, tolerance) {
@@ -142,6 +143,13 @@ export function findGeometryJumps(scored, opts = ANOMALY_DEFAULTS) {
 
     const before = boxes[i - 1];
     const after = boxes[i];
+
+    // A featureless frame has no content box at all, and its all-zero sentinel would
+    // otherwise read as an enormous edge shift the moment anything at all appears. A
+    // window with nothing in it is the flat-onset detector's business, not this one.
+    if (before.empty || after.empty) continue;
+    if (before.boxFraction < opts.minPaintedBefore) continue;
+
     const jumped = edgeShift(before, after) >= opts.boxJump;
     const borderOnset =
       before.borderFraction < opts.borderOnsetBefore && after.borderFraction >= opts.borderOnsetAfter;

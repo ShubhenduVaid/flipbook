@@ -7,6 +7,7 @@ import { startRecording, stopRecording, isRecording, activeRecordings } from "..
 import { analyzeVideo } from "../analyze/analyze.mjs";
 import { alignEvents } from "../analyze/timeline.mjs";
 import { probeDuration } from "../env/ffmpeg.mjs";
+import { roiSchema } from "./schemas.mjs";
 
 export function registerCaptureTools(server) {
   server.registerTool(
@@ -156,9 +157,10 @@ export function registerCaptureTools(server) {
         return_mode: z.enum(["inline", "paths"]).optional()
           .describe("inline (default) embeds images; paths returns file paths to open with Read."),
         analyze: z.boolean().optional().describe("Set false to just stop and keep the file."),
+        roi: roiSchema,
       },
     },
-    async ({ session_id, rubric, max_images, return_mode, analyze = true }) => {
+    async ({ session_id, rubric, max_images, return_mode, analyze = true, roi }) => {
       const id = session_id ?? getActiveSession();
       if (!id) {
         return { isError: true, content: [{ type: "text", text: "No active recording." }] };
@@ -224,6 +226,7 @@ export function registerCaptureTools(server) {
         returnMode: return_mode ?? "inline",
         outDir: framesDir(id),
         label: meta.label,
+        roi: roi ?? null,
       });
       updateMeta(id, { status: "analyzed" });
       return {
