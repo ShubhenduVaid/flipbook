@@ -63,16 +63,41 @@
   const $ = (id) => document.getElementById(id);
   const at = (ms, fn) => setTimeout(fn, ms);
 
-  at(1000, () => {
-    $("status").textContent = "Processing payment…";
-    $("spinner").classList.remove("hidden");
-  });
-  at(3000, () => {
+  // Demo-only knobs; the tests use the default immediate one-shot behaviour.
+  //   ?at=<epochMs>  hold the initial state until that wall-clock moment, then begin
+  //   ?loop=1        repeat the sequence
+  // `at` exists because the demo recording can only start once the window already
+  // exists. Without it the capture begins mid-cycle and the contact sheet tells the
+  // story out of order — confirmation before spinner.
+  const params = new URLSearchParams(location.search);
+  const loop = params.has("loop");
+  const startAt = Number(params.get("at")) || 0;
+  const CYCLE = 11000;
+
+  function reset() {
+    $("status").textContent = "Ready. Submitting in 1s…";
     $("spinner").classList.add("hidden");
-    $("status").textContent = "Done.";
-    $("panel").classList.remove("hidden");
-  });
-  at(5000, () => $("toast").classList.remove("hidden"));
-  at(6500, () => $("toast").classList.add("hidden"));
-  at(8000, () => { $("status").textContent = "Idle."; });
+    $("panel").classList.add("hidden");
+    $("toast").classList.add("hidden");
+  }
+
+  function run() {
+    at(1000, () => {
+      $("status").textContent = "Processing payment…";
+      $("spinner").classList.remove("hidden");
+    });
+    at(3000, () => {
+      $("spinner").classList.add("hidden");
+      $("status").textContent = "Done.";
+      $("panel").classList.remove("hidden");
+    });
+    at(5000, () => $("toast").classList.remove("hidden"));
+    at(6500, () => $("toast").classList.add("hidden"));
+    at(8000, () => { $("status").textContent = "Idle."; });
+    if (loop) at(CYCLE, () => { reset(); run(); });
+  }
+
+  const wait = Math.max(0, startAt - Date.now());
+  if (wait > 0) reset();
+  at(wait, run);
 </script>

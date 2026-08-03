@@ -32,16 +32,17 @@ Looks like a pass. But the run also showed a two-second loading spinner and a
 "Saved successfully" toast — and **both are missing**, because the toast had already
 disappeared by the time the screenshot was taken.
 
-Flipbook records the same run and returns this instead:
+Flipbook records the same run and returns this instead — one image, the whole timeline:
 
-```
-01  t=0.00s  blank page                     start
-02  t=0.25s  "Ready. Submitting in 1s…"     peak-change
-03  t=1.25s  ● spinner visible              peak-change   ← invisible to screenshots
-04  t=1.75s  ● spinner still visible        after:mark
-05  t=3.25s  "Order confirmed" panel        settled
-06  t=5.25s  ⬛ "Saved successfully" toast   peak-change   ← gone before the flow ended
-```
+![Contact sheet of the checkout flow: the resting state, three frames of the loading
+spinner, then the confirmation panel with a success toast that has already vanished by the
+end of the run](docs/demo-contact-sheet.jpg)
+
+Every cell is labelled with its frame number and timestamp, red outlines mark the largest
+visual changes, and the caption says why each frame was chosen. The spinner (02–04) and the
+toast (05, top right) are exactly what the screenshot above missed.
+
+That image is real output, not a mockup — regenerate it with `node scripts/make-demo.mjs`.
 
 `gif_creator` doesn't close this gap: it stitches together screenshots Claude already took
 and exports them for a human, returning nothing to the model. And the vision API reads only
