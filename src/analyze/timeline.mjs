@@ -351,7 +351,7 @@ export function listMarks(events = []) {
 }
 
 /** The listing every mark-resolution error prints, so a miss is self-correcting. */
-export function formatMarkList(marks) {
+function formatMarkList(marks) {
   return marks.map((m) => `  ${m.index}  t=${m.t.toFixed(2)}s  "${m.note}"`).join("\n");
 }
 

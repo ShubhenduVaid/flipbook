@@ -77,6 +77,65 @@ So `allocateText` takes the fixed text as an input and gives the timeline a guar
 floor. A rubric of any length now trims the *header* — an echo of what the caller already
 sent — while the timeline survives. Both blocks say in-band when they were cut.
 
+## Region of interest
+
+`scale=128:128` does not preserve aspect, and that is load-bearing rather than sloppy:
+sample pixel (i, j) maps linearly onto fraction (i/128, j/128) of the source frame whatever
+the window's shape, so a bounding box measured in sample space **already is** a fractional
+rect. No aspect correction anywhere.
+
+The region is the bounding box of pixels that changed across the run, ignoring frame pairs
+where most of the frame moved — a navigation repaints everything and has nothing to say
+about where to crop. Cropping is refused when the box spans most of the frame, because it
+would lose context without gaining resolution.
+
+Crop must precede scale in all three consumers — the sampler, the still extractor and the
+contact-sheet cells — and all three take the same filter string, for the same
+anti-divergence reason `longEdgeScale` exists. The cell aspect has to follow the crop too,
+or every cell gets pillarboxed around a correctly cropped image.
+
+Sampling stays a **single full-frame decode**. The capture-integrity detectors below must
+see the whole window, and `"auto"` needs it to find its region at all, so a crop is
+re-scored in memory from the same buffers, stretched back to the sampling size. That keeps
+every downstream default (`dHash`, `peakBlockDiff`, `samePicture`) valid — a natural-sized
+sub-rect would read past the end of the buffer and silently return NaN deltas, disabling
+dedupe. The gain is sensitivity: both change scores normalise by buffer length, so a
+spinner at 0.3% of the full frame becomes ~8% of the cropped one. It improves **which
+frames get picked, not how they look** — the stills are always extracted from the source at
+full resolution.
+
+## Segments, and why "static" is not a new number
+
+The recording is split at each mark, and each span reports its duration, mean and peak
+change. `static` means `peakDelta < transitionDelta` — the same threshold `findTransitions`
+uses to decide the UI is changing at all — so it is precisely the statement "`findTransitions`
+would find nothing here", and a unit test asserts that equivalence rather than pinning a
+tuned constant. The settled threshold (0.012) was the obvious alternative and gets a real
+reported case wrong: a pan that peaked at 0.020 while the camera never moved.
+
+A static *first* segment is never reported. A page sits still before you touch it.
+
+## Detecting a capture that stopped being about the app
+
+A screenshot taken with size arguments overrides device metrics, resizing the rendered
+viewport underneath the unchanged window — so capture keeps rolling at the old size over a
+page that paints shrunk, or not at all. The output is not blank; it is convincing evidence
+of a bug that does not exist, which is the worst thing an evidence tool can produce.
+
+Two content-based detectors, since nothing here speaks CDP and `S3` forbids it:
+
+- **Geometry change.** The bounding box of non-border content moving abruptly and staying
+  moved, or uniform border appearing where there was none. Gated so a navigation, a modal,
+  a dark theme, a one-frame flicker and permanently letterboxed content all stay silent,
+  and skipped entirely when there was no painted content to begin with — a featureless
+  frame has no geometry to change.
+- **Onset of flatness.** The existing blank check only fires when *every* frame is
+  featureless, so it was blind to a recording that starts fine and goes blank halfway. The
+  transition is the event, not the state.
+
+A fullscreen video player is genuinely indistinguishable from a viewport override, so the
+note offers that reading rather than asserting a cause.
+
 ## Two backends
 
 | | Window capture (default) | Display capture (fallback) |
@@ -112,8 +171,9 @@ leaves an unfinalised file with no `moov` atom.
 
 | File | Owns |
 |---|---|
-| `session.mjs` | Session lifecycle: create, read, update, list, the active-session pointer, the event log |
+| `session.mjs` | Session lifecycle: create, read, update, list, the active-session pointer, the event log, storage accounting, and the one guarded delete |
 | `record.mjs` | Both recorder backends, in-flight process tracking, graceful stop |
+| `prune.mjs` | What a prune would remove, as a pure function of session metadata, kept apart from removing it |
 
 ### `src/analyze/` — turning pixels into evidence
 
@@ -122,19 +182,24 @@ leaves an unfinalised file with no `moov` atom.
 | `frames.mjs` | Sampling to greyscale, extracting stills, long-edge downscaling to a byte budget |
 | `delta.mjs` | Greyscale resize, dHash, MAD, changed area, per-block peak, frame scoring |
 | `select.mjs` | Transitions, settled frames, action correlation, dedupe, the notes that call out a blank or unchanged recording |
+| `segments.mjs` | Splitting the run at each mark and reporting whether each span moved |
+| `anomaly.mjs` | Detecting a capture that stopped being about the app: geometry changes and the onset of blankness |
+| `roi.mjs` | Where the change is, whether cropping to it helps, and the one crop filter every consumer uses |
 | `sheet.mjs` | The labelled contact sheet |
-| `timeline.mjs` | Merging samples, actions and keyframes into ordered rows; collapsing quiet stretches |
+| `timeline.mjs` | Merging samples, actions, marks and segment boundaries into ordered rows; the priority ladder that decides what survives truncation; resolving a mark to a time |
 | `budget.mjs` | The token arithmetic and the text allocation |
 | `input.mjs` | Accepting a video, an animated GIF, or a directory of stills |
+| `clip.mjs` | A short mp4 or gif for a human — the one output that is not evidence |
 | `analyze.mjs` | Orchestration: pipeline in, MCP content blocks out |
 
 ### `src/tools/` and `src/server.mjs`
 
 | File | Owns |
 |---|---|
-| `server.mjs` | Server identity (read from `package.json`), `doctor`, `list_recordings`, transport |
+| `server.mjs` | Server identity (read from `package.json`), `doctor`, `list_recordings`, `prune_recordings`, transport |
 | `tools/capture-tools.mjs` | `start_recording`, `mark`, `stop_recording` |
 | `tools/analysis-tools.mjs` | `analyze_recording`, `get_frames`, and resolving a session or a path to a source |
+| `tools/schemas.mjs` | Parameter shapes used by more than one tool, so the sentence that matters cannot go missing from a copy |
 
 ## Design rules
 
@@ -160,6 +225,20 @@ under `FLIPBOOK_HOME` and never uploaded.
 - The contact sheet can spend several cells on one animation, because a rotating spinner
   genuinely differs frame to frame. Telling an oscillating region from a state change would
   free those cells.
+- **Warning at `mark` time that the previous segment was static is deferred, not
+  forgotten.** It cannot be built on the current recorder. `sckrec` writes through
+  `AVAssetWriter`, which emits the `moov` atom only when the writer is finalised at stop —
+  the same fact recorded above, where an unfinalised file is described as unplayable.
+  Mid-recording there is no `moov`, so ffmpeg cannot decode a single frame and there is
+  nothing to sample. Delivering it would need fragmented output (a rewrite of the writer
+  setup in `native/sckrec.swift`, plus a segment-aware decode path) or a second parallel
+  encoder writing a throwaway stream. Both cost far more than the feature returns, given
+  that `stop_recording` reports the same fact seconds later.
+- A cropped frame is a genuine hazard: it is real evidence about a rectangle that reads as
+  evidence about a page. Four independent signals mitigate it rather than one, but a caller
+  determined to misread a crop still can.
+- The geometry detector cannot distinguish a deliberate fullscreen or window resize from a
+  device-metrics override.
 
 ## Tests
 

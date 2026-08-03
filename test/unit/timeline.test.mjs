@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   alignEvents, buildTimeline, formatTimeline, fitTimeline, formatRow, describeEvent,
-  rowPriority, ROW_TIERS, listMarks, resolveMark, resolveTimeOrigin,
+  rowPriority, ROW_TIERS, listMarks, resolveMark, resolveTimeOrigin, DEFAULT_MARK_WINDOW,
 } from "../../src/analyze/timeline.mjs";
 import { scoredFromDeltas } from "./helpers.mjs";
 
@@ -324,7 +324,8 @@ test("after_mark turns at into offsets from the mark", () => {
 test("after_mark with no range returns a short window, not the rest of the recording", () => {
   const o = resolveTimeOrigin({ afterMark: 2, events: MARKS, duration: 240 });
   assert.equal(o.from, 4.85);
-  assert.equal(o.to, 7.85, "three seconds, not the remaining four minutes");
+  assert.equal(o.to, 4.85 + DEFAULT_MARK_WINDOW, "a short window, not the remaining four minutes");
+  assert.ok(DEFAULT_MARK_WINDOW < 10);
 });
 
 test("offset shifts the origin, and a negative one can look before the mark", () => {

@@ -64,7 +64,7 @@ export function updateMeta(id, patch) {
 }
 
 /** Every session id on disk, newest first. */
-export function allSessionIds() {
+function allSessionIds() {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
   return fs
     .readdirSync(SESSIONS_DIR)

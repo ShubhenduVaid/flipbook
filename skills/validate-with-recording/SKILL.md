@@ -52,6 +52,32 @@ contains nothing.
 If `start_recording` reports `candidates: 2` or more, say which window it chose and
 consider passing `title_contains` or `window_id` to be certain.
 
+## One rule about how you drive: measure in the recording, not between calls
+
+The recording runs continuously; your tool calls do not. Between "click the button" and
+"take a screenshot" sits a full MCP round trip — one to two seconds in practice. A
+one-second animation is completely over before the next call begins. So a spinner, a
+toast, a fade or a layout settle can be perfectly correct and still be invisible to a
+click-then-look pattern, and the honest-looking conclusion is "the feature does not
+work". That conclusion has been drawn, and it was wrong.
+
+Do not try to catch a transient state live. Instead:
+
+- `mark` immediately **before** the action, saying what you expect to happen;
+- fire the action;
+- keep going — do not stop to look;
+- read the evidence afterwards. The timeline's `d` values show what happened between your
+  calls, and the SEGMENTS block shows whether the span your mark opened moved at all.
+
+If you must pin down one moment, use `get_frames` with `after_mark` and a small `offset`
+*after* the run. That reads the recording, which has every frame, instead of re-driving
+the app and hoping to be quick enough.
+
+Related: taking Claude-in-Chrome screenshots **with width/height arguments** during a
+recording overrides the browser's device metrics and can make the window stop painting or
+paint shrunk into a corner while capture keeps rolling. The analysis detects this and says
+so, but the simplest fix is not to pass size arguments to a screenshot mid-recording.
+
 ## Workflow
 
 1. **`doctor`** — run once per session, or whenever something looks wrong. It catches the
@@ -100,17 +126,63 @@ The UX is good.
 - **Detail frames** — full-resolution stills of the moments that changed most, or that
   followed a recorded action. Each says why it was chosen.
 - **Timeline** — every sampled moment with a change magnitude `d`, interleaved with the
-  actions that caused them and any notes. Long quiet stretches are collapsed.
+  actions that caused them and any notes. Long quiet stretches are collapsed. Marks and
+  segment boundaries are never dropped from it, however long the recording.
+- **SEGMENTS** — the recording split at each `mark`, with the duration, mean and peak
+  change of each span. A segment flagged `STATIC` is the strongest single signal this tool
+  produces: between two of your own marks, nothing visibly happened.
 
-Two things worth reacting to:
+Things worth reacting to:
 
+- **A `STATIC` segment after one of your marks** — whatever you expected that action to
+  do, the window did not visibly change while it was in effect. Before reporting an app
+  bug, check the capture notes below: a window that stopped painting looks identical.
 - **"No visual change detected"** — if you did something that should have had an effect,
   this is a bug, not an absence of evidence. Say so.
 - **"Every sampled frame is flat"** — the recording is blank. Run `doctor`; do not report
   findings from a blank recording.
+- **"the window went blank and stayed blank"** — the capture was working and then stopped.
+  Different from the above: judge only the frames before that timestamp.
+- **"the recorded window changed the geometry it was painting"** — usually a screenshot
+  taken with size arguments overriding **device metrics** mid-recording, which makes the
+  page paint shrunk or not at all while capture continues. Frames after that point are
+  evidence about an emulated viewport, not about the app. Benign if you deliberately went
+  fullscreen or resized — the two are indistinguishable from pixels.
 - **"browser action(s) were recorded but the window barely changed"** — this is almost
   always the occlusion problem above, not a broken app. Fix the window and re-record
   before reporting anything.
+- **"Only N% of the frame ever changed"** — a framing problem, not a subtle app. The note
+  quotes the exact rect; re-run with that `roi` to get the subject at full size.
+
+## Framing: `roi`
+
+An image costs a flat 1600 tokens whatever it contains, so a small subject in a large
+window wastes most of the budget. `roi` takes a fractional rect or `"auto"`, and applies
+to `stop_recording`, `analyze_recording` and `get_frames`.
+
+**A cropped frame is not the page.** If the header says `CROPPED VIEW`, everything you can
+say from those images is about that rectangle only. An error banner at the top of the
+page, a modal, a navigation — none of it is in the image, and its absence is not evidence
+of anything. Cropped cells carry an amber border and a `CROP` badge for the same reason.
+
+## Drilling in
+
+- **`get_frames` with `after_mark`** — read `at`/`from`/`to` as offsets from a mark, given
+  as a 1-based index or a substring of its note. `after_mark: "clicked Submit", offset:
+  0.5` beats computing absolute times by hand. With no range you get the following three
+  seconds.
+- **`clip`** — writes a short mp4 or gif of a range, or of a span between two marks, and
+  returns a link. It is **for the human who asked**, not for you: you cannot watch it and
+  it holds no evidence the frames do not. Use it to hand back a few seconds of the fixed
+  behaviour once you have finished judging.
+
+## Housekeeping
+
+Recordings are large — hundreds of megabytes per minute, plus every frame extracted since.
+`list_recordings` and `doctor` report the total footprint and flag sessions whose evidence
+was never looked at. `prune_recordings` reclaims them; it is a dry run unless you pass
+`confirm: true`, and it refuses a request with no selectors rather than reading one as
+"everything".
 
 ## Reporting
 

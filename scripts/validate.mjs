@@ -170,6 +170,79 @@ async function checkPromises() {
     fs.rmSync(outDir, { recursive: true, force: true });
   }
 
+  // P11 — a mark must survive any amount of pressure on the timeline. Checkable with no
+  // fixture at all, because it is pure arithmetic over synthetic rows.
+  {
+    const { buildTimeline, fitTimeline } = await import(path.join(repo, "src/analyze/timeline.mjs"));
+    const scored = Array.from({ length: 5000 }, (_, i) => ({
+      index: i, t: i / 4, delta: i % 3 ? 0.001 : 0.08, area: 0.01, peak: 0.05,
+    }));
+    const events = Array.from({ length: 20 }, (_, i) => ({
+      t: (i + 1) * 60, type: "mark", note: `checkpoint-${i}-sentinel`,
+    }));
+    const { rows, dropped } = buildTimeline({ scored, events, keyframes: [] });
+    const fitted = fitTimeline(rows, { sampleFps: 4, maxChars: 600, alreadyDropped: dropped });
+    const missing = events.filter((e) => !fitted.text.includes(e.note));
+    missing.length === 0
+      ? pass(
+          "P11",
+          "a mark is never dropped from the timeline",
+          `20 marks over ${fitted.rowsTotal} rows survived a 600-char budget`
+        )
+      : fail("P11", "a mark is never dropped from the timeline", `${missing.length} mark(s) vanished`);
+  }
+
+  // P13 — the deletion tool must not delete on a dry run, and must not read an empty
+  // request as "everything".
+  {
+    const { planPrune } = await import(path.join(repo, "src/capture/prune.mjs"));
+    const sessions = [
+      { id: "20260701-101010-a1b1", status: "recorded", createdAt: "2026-07-01T10:10:10Z", bytes: 1e6 },
+      { id: "20260702-101010-a1b2", status: "recorded", createdAt: "2026-07-02T10:10:10Z", bytes: 1e6 },
+      { id: "20260703-101010-a1b3", status: "recorded", createdAt: "2026-07-03T10:10:10Z", bytes: 1e6 },
+      { id: "20260704-101010-a1b4", status: "recorded", createdAt: "2026-07-04T10:10:10Z", bytes: 1e6 },
+    ];
+    const bare = planPrune(sessions, {});
+    const confirmOnly = planPrune(sessions, { confirm: true });
+    const real = planPrune(sessions, { only_unanalyzed: true, keep_recent: 0 });
+    const safe =
+      bare.refusal && bare.candidates.length === 0 &&
+      confirmOnly.refusal && confirmOnly.candidates.length === 0 &&
+      real.candidates.length > 0 && real.deleted === undefined;
+    safe
+      ? pass("P13", "pruning deletes nothing without an explicit selector and confirmation", "refuses {} and {confirm:true}")
+      : fail("P13", "pruning deletes nothing without an explicit selector and confirmation", "an empty request selected sessions");
+  }
+
+  // P5 complement — the fixture-gated check above only sees one analysis. The note
+  // builders are where verdict language would actually creep in, so read them directly.
+  {
+    const { segmentNotes } = await import(path.join(repo, "src/analyze/segments.mjs"));
+    const { geometryNote, flatOnsetNote } = await import(path.join(repo, "src/analyze/anomaly.mjs"));
+    const { framingHint } = await import(path.join(repo, "src/analyze/roi.mjs"));
+    const { SAMPLE_W, SAMPLE_H } = await import(path.join(repo, "src/analyze/frames.mjs"));
+
+    const blank = new Uint8Array(SAMPLE_W * SAMPLE_H).fill(30);
+    const lit = Uint8Array.from(blank);
+    for (let y = 60; y < 68; y++) for (let x = 40; x < 46; x++) lit[y * SAMPLE_W + x] = 240;
+    const scored = Array.from({ length: 10 }, (_, i) => ({
+      index: i, t: i / 4, delta: 0.05, area: i ? 0.004 : 0, pixels: i % 2 ? lit : blank,
+    }));
+
+    const texts = [
+      ...segmentNotes([
+        { index: 2, static: true, durationSec: 6.6, peakDelta: 0.01, openedBy: "clicked Generate", closedBy: "end of recording" },
+      ]),
+      geometryNote({ t: 4.25, before: { boxFraction: 1, borderFraction: 0 }, after: { boxFraction: 0.22, borderFraction: 0.78 }, restoredAtT: null }),
+      flatOnsetNote({ t: 6.5, secondsFlat: 5.2, toEnd: true }),
+      framingHint(scored, { info: { width: 1440, height: 900 } }) ?? "",
+    ].join("\n");
+    const verdictWords = texts.match(/\b(PASS|FAIL|PASSED|FAILED)\b|✅|❌/g);
+    !verdictWords
+      ? pass("P12", "every analysis note states evidence, never a verdict", "4 note builders checked")
+      : fail("P12", "every analysis note states evidence, never a verdict", [...new Set(verdictWords)].join(", "));
+  }
+
   manual("P7", "spinner and transient toast captured", "npm run test:e2e");
   manual("P8", "capture works while the browser is occluded", "npm run test:e2e:occluded");
   manual("P9", "user-supplied .mov / .gif / stills analysable", "npm run test:mcp");
@@ -298,6 +371,27 @@ async function checkSecurity(files) {
     ? pass("S2", "session ids cannot escape the data directory", detail)
     : fail("S2", "session ids cannot escape the data directory", detail);
 
+  // S7 — the same question for the one path that removes files. Worth its own criterion
+  // because a traversal here destroys data rather than merely writing somewhere odd.
+  {
+    const traversals = [
+      "../../../../tmp/pwned", "..", "../sessions", "foo/../../bar", "/etc/passwd",
+      "20260803-101010-a1b2/../../escape", "20260803-101010-a1b2/nested",
+    ];
+    const accepted = [];
+    for (const id of traversals) {
+      try {
+        session.deleteSession(id);
+        accepted.push(id);
+      } catch {
+        // Refused, which is the whole point.
+      }
+    }
+    accepted.length === 0
+      ? pass("S7", "deletion cannot escape the data directory", `${traversals.length} traversals refused`)
+      : fail("S7", "deletion cannot escape the data directory", `accepted ${accepted.join(", ")}`);
+  }
+
   // S3 — network egress.
   const net = [];
   for (const f of code.filter((f) => f.startsWith("src/"))) {
@@ -369,6 +463,25 @@ async function checkQuality(files) {
   dead.length === 0
     ? pass("Q2", "no dead exports", `${srcFiles.length} modules scanned`)
     : fail("Q2", "no dead exports", `${dead.length}: ${dead.slice(0, 6).join(", ")}${dead.length > 6 ? " …" : ""}`);
+
+  // Q7 — the tool list is the only documentation the model gets at call time, so a
+  // parameter with no `.describe()` is an undocumented parameter. Checked by source scan
+  // rather than over a live server so it runs in CI.
+  {
+    const undocumented = [];
+    for (const f of ["src/server.mjs", "src/tools/capture-tools.mjs", "src/tools/analysis-tools.mjs", "src/tools/schemas.mjs"]) {
+      if (!exists(f)) continue;
+      const src = read(f);
+      // Join continuation lines: a schema is routinely spread over several of them.
+      const flat = src.replace(/\n\s*/g, " ");
+      for (const m of flat.matchAll(/([a-z_]+):\s*(z\.(?:[^;]*?))(?=,\s*[a-z_]+:\s*z\.|,?\s*\}\s*,?\s*\})/g)) {
+        if (!m[2].includes(".describe(")) undocumented.push(`${f}:${m[1]}`);
+      }
+    }
+    undocumented.length === 0
+      ? pass("Q7", "every tool parameter describes itself", "all schema properties carry .describe()")
+      : fail("Q7", "every tool parameter describes itself", undocumented.join(", "));
+  }
 
   const unit = await run("npm", ["test"]);
   const count = /# pass (\d+)/.exec(unit.stdout)?.[1];
@@ -463,6 +576,19 @@ async function checkDocs() {
   inReadme && inDoctor
     ? pass("D4", "the two blank-recording traps are documented and detected", "README and doctor both cover them")
     : fail("D4", "the two blank-recording traps are documented and detected", `readme=${inReadme} doctor=${inDoctor}`);
+
+  // D5 — a finding the model does not know how to act on is a finding wasted, so every
+  // note the analysis can emit has to be explained where the model will read it.
+  const skill = exists("skills/validate-with-recording/SKILL.md")
+    ? read("skills/validate-with-recording/SKILL.md")
+    : "";
+  const mustExplain = [
+    "STATIC", "roi", "after_mark", "clip", "device metrics", "stopped painting", "prune_recordings",
+  ];
+  const unexplained = mustExplain.filter((p) => !new RegExp(p.replace(/ /g, "\\s+"), "i").test(skill));
+  unexplained.length === 0
+    ? pass("D5", "every finding the analysis can emit is explained in the skill", `${mustExplain.length} phrases covered`)
+    : fail("D5", "every finding the analysis can emit is explained in the skill", `missing: ${unexplained.join(", ")}`);
 }
 
 // ─── report ──────────────────────────────────────────────────────────────────

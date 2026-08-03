@@ -114,10 +114,10 @@ And the verdict cites evidence you can check:
 Flipbook returns **evidence, never a verdict**. A tool that answers "PASS" hides its
 reasoning and can't be argued with.
 
-## Two ways to record nothing
+## Three ways to record nothing
 
-Both produce a plausible-looking recording that contains no evidence. Both were found the
-hard way; `doctor` warns about each.
+Each produces a plausible-looking recording that contains no evidence. All were found the
+hard way; `doctor` warns about the first two.
 
 1. **Recording a window whose active tab isn't the one under test.** A window paints only
    its active tab, and Claude in Chrome will happily drive a *background* tab. Switch to it
@@ -127,24 +127,45 @@ hard way; `doctor` warns about each.
    browser windows at nearly the same position are the usual culprit. Behind a full-screen
    terminal on a *different* Space is fine; underneath another window on the same Space is
    not.
+3. **Taking a screenshot with size arguments while recording.** That overrides the
+   browser's device metrics, so the page repaints into a smaller viewport — or stops
+   painting — while capture keeps rolling at the old size. This one is worse than the other
+   two, because the result isn't blank: it's convincing evidence of a bug that doesn't
+   exist. One reported run showed an 11-second blank load that a control run rendered in
+   ~1.8s. The analysis detects the geometry change and says so.
 
 When actions were recorded but the pixels didn't move, the analysis says so rather than
-letting you report a false pass.
+letting you report a false pass. Same for a span between two marks where nothing changed,
+and for a subject too small in frame to read.
 
 ## Tools
 
 | Tool | Purpose |
 |---|---|
-| `doctor` | Preflight: macOS, ffmpeg + filters, native helper, permission, target window, disk |
+| `doctor` | Preflight: macOS, ffmpeg + filters, native helper, permission, target window, disk, footprint |
 | `start_recording` | Capture a window (`label`, `target`, `title_contains`, `window_id`, `fps`, `max_duration_s`) |
-| `mark` | Annotate the timeline mid-run |
-| `stop_recording` | Stop, analyse, return the evidence against a `rubric` |
-| `analyze_recording` | Same analysis for any `.mov/.mp4/.webm/.m4v/.gif` or a directory of stills |
-| `get_frames` | Full-resolution drill-down at exact timestamps or over a range |
-| `list_recordings` | Browse past sessions |
+| `mark` | Annotate the timeline mid-run, and split the per-segment change stats |
+| `stop_recording` | Stop, analyse, return the evidence against a `rubric` (`roi`, `clip`) |
+| `analyze_recording` | Same analysis for any `.mov/.mp4/.webm/.m4v/.gif` or a directory of stills (`roi`, `clip`) |
+| `get_frames` | Full-resolution drill-down at exact timestamps, over a range, or relative to a mark (`after_mark`, `offset`, `roi`) |
+| `list_recordings` | Browse past sessions, with sizes and total footprint |
+| `prune_recordings` | Reclaim disk — a dry run unless `confirm: true` |
 
 `analyze_recording` accepts recordings you made yourself — hand it a QuickTime capture of a
 bug you can't reproduce on demand.
+
+### Framing: `roi`
+
+An image costs the same whatever it contains, so a small subject in a large window spends
+most of its resolution on nothing. `roi` takes a fractional rect or `"auto"` — which derives
+the region from the pixels that actually changed — and applies to the three tools above.
+When the subject is small and no `roi` was given, the analysis says so and quotes the exact
+rect to pass.
+
+A cropped frame is announced four ways: a `CROPPED VIEW` header line, a `[CROP …]` prefix on
+every caption, an amber border and badge burnt into every cell, and a `roi` object in
+`structuredContent` that is present whether or not it applied. A crop read as the whole page
+is exactly the failure mode the geometry detector exists to catch, so it's worth repeating.
 
 ## Why stills instead of video
 
@@ -184,16 +205,16 @@ analysis, and display capture remains available via `target: "display"`.
 ```bash
 npm run validate       # score the repo against docs/VALIDATION-RUBRIC.md
 npm run validate -- --full   # …including the criteria that need macOS + Chrome
-npm test               # 54 unit tests, no browser or permission needed
+npm test               # 161 unit tests, no browser or permission needed
 npm run lint           # Biome (via npx — deliberately not a dependency)
 npm run lint:manifests # plugin/marketplace/package manifests agree
-npm run test:mcp       # 20 MCP protocol checks (macOS)
+npm run test:mcp       # 36 MCP protocol checks (macOS)
 npm run test:e2e       # fixture: spinner + transient toast must be captured (macOS + Chrome)
 npm run test:e2e:occluded  # same, with the browser occluded
 ```
 
 **[docs/VALIDATION-RUBRIC.md](docs/VALIDATION-RUBRIC.md)** is the standard this project holds
-itself to — 32 numbered criteria covering the promises this README makes, naming, security,
+itself to — 38 numbered criteria covering the promises this README makes, naming, security,
 quality and docs. `npm run validate` is its executable form and reports each criterion
 individually; there is no aggregate score, because a percentage would let a security failure
 be averaged away by passing style checks. **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -224,9 +245,10 @@ hooks/              PostToolUse hook correlating Claude-in-Chrome actions
 native/sckrec.swift ScreenCaptureKit window recorder
 skills/             when and how Claude should use this
 src/env/            ffmpeg, native helper, Chrome, doctor, paths
-src/capture/        session lifecycle and recorder processes
-src/analyze/        sampling, delta scoring, selection, sheet, budget, timeline
-src/tools/          MCP tool definitions
+src/capture/        session lifecycle, recorder processes, prune policy
+src/analyze/        sampling, delta scoring, selection, segments, capture anomalies,
+                    region of interest, sheet, budget, timeline, clips
+src/tools/          MCP tool definitions and shared parameter schemas
 test/unit/          CI-safe unit tests
 ```
 

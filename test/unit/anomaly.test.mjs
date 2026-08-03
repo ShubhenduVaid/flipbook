@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  contentBox, findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote,
+  contentBox, findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote, ANOMALY_DEFAULTS,
 } from "../../src/analyze/anomaly.mjs";
 import { SAMPLE_W, SAMPLE_H } from "../../src/analyze/frames.mjs";
 import { blankFrame, texturedFrame } from "./helpers.mjs";
@@ -150,4 +150,18 @@ test("content appearing on a wholly uniform frame is not a geometry change", () 
 test("contentBox flags a featureless frame rather than reporting a zero-size box", () => {
   assert.equal(contentBox(blankFrame(32)).empty, true);
   assert.equal(contentBox(texturedFrame(2)).empty, false);
+});
+
+test("the onset rule needs a real transition, not just a high border fraction", () => {
+  // The gate that keeps a permanently dark or letterboxed layout silent: the border has
+  // to have been absent beforehand, not merely present afterwards.
+  assert.ok(
+    ANOMALY_DEFAULTS.borderOnsetBefore < ANOMALY_DEFAULTS.borderOnsetAfter,
+    "otherwise every dark-themed page reports a capture fault"
+  );
+  assert.ok(ANOMALY_DEFAULTS.persistAfter > 1, "a single frame is a flicker, not a change");
+  assert.ok(
+    ANOMALY_DEFAULTS.flatVariance <= ANOMALY_DEFAULTS.liveVariance,
+    "the flat and live bands must not overlap"
+  );
 });
