@@ -241,3 +241,30 @@ function countDiff(a, b) {
   for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 12) n++;
   return n;
 }
+
+// Caught by a real occluded-fixture run: the change was only 0.6% of the frame, but it
+// was spread across a bounding box covering 58% of it. Cropping to that gains ~1.3x,
+// which is not worth a re-run, and the hint's old wording claimed a 269px-wide region
+// was "too small to read".
+test("framingHint does not recommend a crop that would gain almost nothing", () => {
+  const base = blankFrame(30);
+  const spread = withRect(withRect(base, { x: 10, y: 10, w: 5, h: 5, value: 240 }), {
+    x: 108, y: 100, w: 5, h: 5, value: 240,
+  });
+  const hint = framingHint(scoredFrom(alternating(base, spread, 10)), { info: INFO });
+  assert.equal(hint, null, "a huge bounding box around a tiny change is not a framing win");
+});
+
+test("the hint quotes the resolution gain, and it is real", () => {
+  const base = blankFrame(30);
+  const lit = withRect(base, { x: 40, y: 60, w: 6, h: 8, value: 240 });
+  const hint = framingHint(scoredFrom(alternating(base, lit, 10)), { info: INFO });
+
+  const gain = Number(/roughly ([\d.]+)x the detail/.exec(hint)[1]);
+  const rect = JSON.parse(hint.match(/roi:(\{[^}]*\})/)[1]);
+  assert.ok(gain > 1.5, `a hint worth acting on, got ${gain}x`);
+  assert.ok(
+    Math.abs(gain - 1 / Math.sqrt(rect.w * rect.h)) < 0.11,
+    "the quoted multiplier matches the rect it recommends"
+  );
+});

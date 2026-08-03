@@ -25,7 +25,12 @@ export const ROI_DEFAULTS = {
   minSide: 0.1, // never produce a box narrower than this fraction of a dimension
   minSourcePx: 320, // …nor smaller than this many source pixels, when dimensions are known
   maxAreaFraction: 0.6, // a box covering more than this means cropping would not help
-  hintAreaFraction: 0.02, // below this, the framing hint fires
+  hintAreaFraction: 0.02, // below this much *changed* area, the framing hint is considered
+  // …but only if the resulting rect is small enough for the crop to be worth it. A tiny
+  // change spread between opposite corners has a huge bounding box, and cropping to 58%
+  // of the frame buys about 1.3x — not worth a re-run. A quarter of the frame doubles
+  // linear resolution, which is.
+  hintMaxRectFraction: 0.25,
 };
 
 /**
@@ -296,16 +301,24 @@ export function framingHint(scored, { info = {}, opts = ROI_DEFAULTS } = {}) {
   if (box.w * SAMPLE_W < 3 || box.h * SAMPLE_H < 3) return null;
 
   const rect = padBox(box, info, opts);
+
+  // Cropping to nearly the whole frame gains nothing, so recommending it would waste a
+  // re-run. Caught by a real recording whose change was tiny but spread across a box
+  // covering 58% of the frame.
+  const rectFraction = rect.w * rect.h;
+  if (rectFraction > opts.hintMaxRectFraction) return null;
+
   const px = roiPixels(rect, info);
   const where = px
     ? `a ${px.w}x${px.h} px region at (${px.x},${px.y}) of the ${info.width}x${info.height} frame`
     : `a region ${Math.round(rect.w * 100)}% x ${Math.round(rect.h * 100)}% of the frame`;
+  const gain = Math.round(10 / Math.sqrt(rectFraction)) / 10;
 
   return (
     `Only ${(box.rawAreaFraction * 100).toFixed(1)}% of the frame ever changed, all of it ` +
-    `inside ${where}. At contact-sheet size that region is roughly ` +
-    `${Math.max(1, Math.round(rect.w * 340))} pixels across, which is too small to read. ` +
-    `Re-run with roi:${JSON.stringify(rect)} — or roi:"auto", which resolves to the same ` +
-    `region — to see it at full size.`
+    `inside ${where}. Every image spends the rest of its resolution on parts of the window ` +
+    `that never moved. Re-run with roi:${JSON.stringify(rect)} — or roi:"auto", which ` +
+    `resolves to the same region — for roughly ${gain.toFixed(1)}x the detail on the ` +
+    `subject at the same token cost.`
   );
 }

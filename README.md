@@ -205,7 +205,7 @@ analysis, and display capture remains available via `target: "display"`.
 ```bash
 npm run validate       # score the repo against docs/VALIDATION-RUBRIC.md
 npm run validate -- --full   # …including the criteria that need macOS + Chrome
-npm test               # 161 unit tests, no browser or permission needed
+npm test               # 163 unit tests, no browser or permission needed
 npm run lint           # Biome (via npx — deliberately not a dependency)
 npm run lint:manifests # plugin/marketplace/package manifests agree
 npm run test:mcp       # 36 MCP protocol checks (macOS)
