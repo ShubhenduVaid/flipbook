@@ -7,6 +7,7 @@ import { selectKeyframes, DEFAULTS } from "./select.mjs";
 import { buildContactSheet } from "./sheet.mjs";
 import { planImages, estimateTokens, allocateText, clampText } from "./budget.mjs";
 import { buildTimeline, fitTimeline } from "./timeline.mjs";
+import { buildSegments, formatSegments, segmentNotes } from "./segments.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -71,6 +72,11 @@ export async function analyzeVideo({
     );
   }
 
+  // Split at each mark, so "I marked this and then nothing happened" is a statement the
+  // analysis makes rather than one the reader has to reconstruct from the delta column.
+  const segments = buildSegments(scored, events);
+  notes.push(...segmentNotes(segments));
+
   const aspect = info.width && info.height ? info.width / info.height : 1.5;
   const sheet = await buildContactSheet(video, keyframes, outDir, { videoAspect: aspect });
 
@@ -102,7 +108,7 @@ export async function analyzeVideo({
     detailFiles.push({ ...f, path: fitted.path, bytes: fitted.bytes });
   }
 
-  const timeline = buildTimeline({ scored, events, keyframes });
+  const timeline = buildTimeline({ scored, events, keyframes, segments });
 
   // ---- assemble the response -------------------------------------------------
   //
@@ -132,7 +138,7 @@ export async function analyzeVideo({
 
   const header = buildHeader({
     video, label, info, from, to: rangeTo, keyframes, transitions,
-    events, rubric, focus, notes, sheet, detailFiles, plan,
+    events, rubric, focus, notes, sheet, detailFiles, plan, segments,
   });
 
   const fixedChars =
@@ -192,6 +198,7 @@ export async function analyzeVideo({
     detailFrames: detailFiles.map((f) => ({ t: f.t, path: f.path, reasons: f.reasons })),
     contactSheet: sheet ? sheet.path : null,
     transitionCount: transitions.length,
+    segments,
     events: events.map((e) => ({ t: e.t, type: e.type, tool: e.tool, note: e.note })),
     notes,
     estimatedTokens: estimateTokens({
@@ -222,7 +229,7 @@ function imageContent(p, returnMode) {
 
 function buildHeader({
   video, label, info, from, to, keyframes, transitions, events, rubric, focus, notes, sheet,
-  detailFiles, plan,
+  detailFiles, plan, segments = [],
 }) {
   const lines = [];
   lines.push(`RECORDING ANALYSIS${label ? ` — ${label}` : ""}`);
@@ -237,21 +244,19 @@ function buildHeader({
       `${sheet ? 1 : 0} contact sheet + ${detailFiles.length} detail frame(s) of a ${plan.total}-image budget`
   );
 
+  const segmentBlock = formatSegments(segments);
+  if (segmentBlock) {
+    lines.push("");
+    lines.push(segmentBlock);
+  }
+
   if (notes.length) {
     lines.push("");
     for (const n of notes) lines.push(`! ${n}`);
   }
 
-  if (rubric) {
-    lines.push("");
-    lines.push("VALIDATION RUBRIC (judge the evidence below against this):");
-    for (const line of String(rubric).split("\n")) lines.push(`  ${line}`);
-  }
-  if (focus) {
-    lines.push("");
-    lines.push(`FOCUS: ${focus}`);
-  }
-
+  // Above the rubric, not below it. The header is trimmed from the end, so a long
+  // caller-supplied rubric used to eat the instructions for reading the evidence.
   lines.push("");
   lines.push(
     "HOW TO READ THIS: the contact sheet shows the whole recording at a glance; the " +
@@ -266,6 +271,16 @@ function buildHeader({
         "If the evidence is insufficient for an item, say so and request more frames rather " +
         "than guessing."
     );
+  }
+
+  if (focus) {
+    lines.push("");
+    lines.push(`FOCUS: ${focus}`);
+  }
+  if (rubric) {
+    lines.push("");
+    lines.push("VALIDATION RUBRIC (judge the evidence below against this):");
+    for (const line of String(rubric).split("\n")) lines.push(`  ${line}`);
   }
   return lines.join("\n");
 }

@@ -145,6 +145,22 @@ test("formatTimeline produces a readable, labelled block", () => {
   assert.match(text, /no visual change for/);
 });
 
+test("segment dividers land in the timeline and survive the tightest budget", () => {
+  const scored = scoredFromDeltas(Array.from({ length: 400 }, () => 0.2));
+  const segments = [
+    { index: 1, fromT: 0, peakDelta: 0.2, static: false, openedBy: "start of recording" },
+    { index: 2, fromT: 12, peakDelta: 0.01, static: true, openedBy: "clicked Generate" },
+  ];
+  const { rows, dropped } = buildTimeline({ scored, events: [], keyframes: [], segments });
+
+  const dividers = rows.filter((r) => r.kind === "segment");
+  assert.equal(dividers.length, 1, "the start of the recording is not its own divider");
+  assert.equal(dividers[0].segment, 2);
+
+  const fitted = fitTimeline(rows, { sampleFps: 4, maxChars: 300, alreadyDropped: dropped });
+  assert.match(fitted.text, /segment 2/, "a boundary is pinned like a mark");
+});
+
 test("formatRow renders a segment divider with its peak change", () => {
   const line = formatRow(
     { kind: "segment", t: 3.2, segment: 2, peakDelta: 0.41, isStatic: false, label: "clicked Generate" },
