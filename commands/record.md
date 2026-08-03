@@ -6,7 +6,7 @@ allowed-tools: mcp__plugin_flipbook_rec__doctor, mcp__plugin_flipbook_rec__start
 
 Validate this in a real browser by recording it: **$ARGUMENTS**
 
-Follow the `screen-recording-qa` skill. Specifically:
+Follow the `validate-with-recording` skill. Specifically:
 
 1. Run `doctor` first if you have not already this session.
 2. Turn the request above into an explicit rubric — observable criteria, one per line,

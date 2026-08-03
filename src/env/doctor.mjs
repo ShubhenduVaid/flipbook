@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import fs from "node:fs";
 import os from "node:os";
 import { resolveFfmpeg, capabilities, listAvfDevices, repairBundledFfmpeg } from "./ffmpeg.mjs";
 import { hasSwift, buildNative, listWindows, BINARY } from "./native.mjs";
@@ -241,6 +240,3 @@ export function formatDoctor(result) {
   return lines.join("\n");
 }
 
-export function dataHomeExists() {
-  return fs.existsSync(DATA_HOME);
-}

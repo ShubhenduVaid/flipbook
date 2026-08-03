@@ -182,16 +182,31 @@ analysis, and display capture remains available via `target: "display"`.
 ## Development
 
 ```bash
-npm test               # 47 unit tests, no browser or permission needed
+npm run validate       # score the repo against docs/VALIDATION-RUBRIC.md
+npm run validate -- --full   # …including the criteria that need macOS + Chrome
+npm test               # 54 unit tests, no browser or permission needed
+npm run lint           # Biome (via npx — deliberately not a dependency)
 npm run lint:manifests # plugin/marketplace/package manifests agree
 npm run test:mcp       # 20 MCP protocol checks (macOS)
 npm run test:e2e       # fixture: spinner + transient toast must be captured (macOS + Chrome)
 npm run test:e2e:occluded  # same, with the browser occluded
 ```
 
-`npm test` and the manifest lint run in CI on every push; the rest need macOS, Chrome and
-Screen Recording permission, so they're local checks. Before a release, also run
+**[docs/VALIDATION-RUBRIC.md](docs/VALIDATION-RUBRIC.md)** is the standard this project holds
+itself to — 32 numbered criteria covering the promises this README makes, naming, security,
+quality and docs. `npm run validate` is its executable form and reports each criterion
+individually; there is no aggregate score, because a percentage would let a security failure
+be averaged away by passing style checks. **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+explains the pipeline and what each module owns.
+
+`npm run validate`, `npm test` and the linters run in CI on every push; the rest need macOS,
+Chrome and Screen Recording permission, so they're local checks. Before a release, also run
 `claude plugin validate . --strict`.
+
+Biome is invoked through `npx` rather than added as a devDependency: Claude Code installs
+plugin dependencies without `--omit=dev`, so a devDependency would ship into every user's
+plugin cache. The formatter is off — the linter catches real defects, while reformatting
+would churn deliberately aligned ffmpeg argument lists.
 
 `FLIPBOOK_DEBUG_SELECT=1` traces every keyframe accept/merge decision to stderr, which is
 what threshold tuning needs.

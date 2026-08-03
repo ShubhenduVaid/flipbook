@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  IMAGE_TOKENS, outputBudget, safeTokenCeiling, estimateTokens, planImages, fitText,
+  IMAGE_TOKENS, outputBudget, safeTokenCeiling, estimateTokens, planImages, allocateText, clampText,
 } from "../../src/analyze/budget.mjs";
 
 /**
@@ -69,27 +69,54 @@ test("planImages caps the contact sheet at 16 cells", () => {
   assert.equal(planImages({ maxImages: 6, sheetCells: 9 }).sheetCells, 9);
 });
 
-test("fitText leaves a payload that already fits untouched", () => {
+test("clampText leaves a block that already fits untouched", () => {
   const text = "a short timeline";
-  const { text: out, truncated } = fitText(text, { images: 6 });
+  const { text: out, truncated } = clampText(text, 1000, "trimmed");
   assert.equal(out, text);
   assert.equal(truncated, false);
 });
 
-test("fitText truncates so images plus text stay inside the ceiling", () => {
-  const huge = "x".repeat(200_000);
-  const { text, truncated } = fitText(huge, { images: 6 });
-
+test("clampText cuts to the budget and says so in-band", () => {
+  const { text, truncated } = clampText("x".repeat(5000), 500, "use get_frames for more");
   assert.equal(truncated, true);
-  const total = estimateTokens({ images: 6, textChars: text.length });
-  assert.ok(
-    total <= safeTokenCeiling(),
-    `truncated payload still over ceiling: ${total} > ${safeTokenCeiling()}`
-  );
-  assert.match(text, /get_frames/, "truncation must tell the reader how to see more");
+  assert.ok(text.length <= 500, `clamped to ${text.length}, budget was 500`);
+  assert.match(text, /get_frames/, "a cut must tell the reader how to see the rest");
 });
 
-test("fitText keeps a usable minimum even when images consume the budget", () => {
-  const { text } = fitText("y".repeat(50_000), { images: 7 });
-  assert.ok(text.length >= 400, "never truncate the timeline down to nothing");
+/**
+ * The allocation has to cover the whole response, not just the two big blocks. A real
+ * measured payload went over the advertised ceiling because per-image captions and the
+ * resource-link description were never counted.
+ */
+test("allocateText accounts for the fixed text the response also carries", () => {
+  const withoutFixed = allocateText({ images: 6, fixedChars: 0 });
+  const withFixed = allocateText({ images: 6, fixedChars: 2000 });
+  assert.ok(
+    withFixed.total < withoutFixed.total,
+    "captions must reduce what is left for header and timeline"
+  );
+});
+
+test("allocateText keeps images plus all text inside the ceiling", () => {
+  for (const images of [1, 4, 6, 7]) {
+    const fixedChars = 800;
+    const { header, timeline } = allocateText({ images, fixedChars });
+    const total = estimateTokens({ images, textChars: header + timeline + fixedChars });
+    assert.ok(
+      total <= safeTokenCeiling() || images * 1600 >= safeTokenCeiling(),
+      `${images} images + text = ${total} tokens, ceiling ${safeTokenCeiling()}`
+    );
+  }
+});
+
+/**
+ * The regression that removed the timeline entirely: a caller-supplied rubric of
+ * arbitrary length must never be able to starve the one channel describing moments no
+ * image was spent on.
+ */
+test("the timeline always gets a floor, however large the header wants to be", () => {
+  for (const images of [1, 6, 7]) {
+    const { timeline } = allocateText({ images, fixedChars: 100_000 });
+    assert.ok(timeline >= 800, `timeline allowance collapsed to ${timeline}`);
+  }
 });

@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Lint
+        run: npm run lint
+
       - name: Lint manifests
         run: npm run lint:manifests
 
@@ -32,6 +35,12 @@ jobs:
       # CI runner; they are documented as local checks in the README instead.
       - name: Unit tests
         run: npm test
+
+      # The rubric's mechanical criteria: naming, security, dead exports, docs.
+      # Criteria that need macOS, Chrome or Screen Recording permission report MANUAL
+      # rather than silently passing.
+      - name: Validation rubric
+        run: npm run validate
 
   swift:
     name: native recorder compiles

@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { findTransitions, selectKeyframes, DEFAULTS } from "../../src/analyze/select.mjs";
 import { scoredFromDeltas, blankFrame, withRect, texturedFrame } from "./helpers.mjs";
 
-const at = (frames, t) => frames.find((f) => Math.abs(f.t - t) < 1e-6);
 
 test("findTransitions locates the peak and the frame where it settles", () => {
   //            0     1      2      3     4     5     6

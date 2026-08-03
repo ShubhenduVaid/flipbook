@@ -130,12 +130,18 @@ if (mcp) {
   if (servers.length !== 1) {
     fail(`.mcp.json should declare exactly one server, found ${servers.length}`);
   }
+  // CLAUDE_PLUGIN_ROOT is a literal placeholder Claude Code substitutes at load time,
+  // so these really are plain strings and not template literals we forgot to tag.
+  // Claude Code substitutes this placeholder at plugin load time, so it is a literal
+  // string here rather than a template we forgot to tag.
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder, not a template
+  const ROOT_PLACEHOLDER = "${CLAUDE_PLUGIN_ROOT}";
   for (const [name, cfg] of Object.entries(mcp.mcpServers ?? {})) {
-    const entry = (cfg.args ?? []).find((a) => a.includes("${CLAUDE_PLUGIN_ROOT}"));
+    const entry = (cfg.args ?? []).find((a) => a.includes(ROOT_PLACEHOLDER));
     if (!entry) {
-      fail(`.mcp.json: server "${name}" must locate its script via \${CLAUDE_PLUGIN_ROOT}`);
+      fail(`.mcp.json: server "${name}" must locate its script via ${ROOT_PLACEHOLDER}`);
     } else {
-      requireFile(entry.replace("${CLAUDE_PLUGIN_ROOT}/", ""), ".mcp.json");
+      requireFile(entry.replace(`${ROOT_PLACEHOLDER}/`, ""), ".mcp.json");
     }
   }
 }

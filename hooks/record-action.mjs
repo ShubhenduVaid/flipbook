@@ -38,7 +38,9 @@ try {
   // No recording in progress is the common case — do nothing, cheaply.
   if (!fs.existsSync(ACTIVE)) process.exit(0);
   const sessionId = fs.readFileSync(ACTIVE, "utf8").trim();
-  if (!sessionId) process.exit(0);
+  // The pointer is just a file, so treat its contents as untrusted: without this,
+  // a tampered or corrupted value is joined straight into an append path below.
+  if (!/^\d{8}-\d{6}-[0-9a-f]{4}$/.test(sessionId)) process.exit(0);
 
   const eventsFile = path.join(DATA_HOME, "sessions", sessionId, "events.jsonl");
   if (!fs.existsSync(path.dirname(eventsFile))) process.exit(0);

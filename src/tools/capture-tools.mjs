@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { z } from "zod";
 import {
   createSession, updateMeta, readMeta, setActiveSession, getActiveSession,

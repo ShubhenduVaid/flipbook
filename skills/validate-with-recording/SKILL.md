@@ -1,5 +1,5 @@
 ---
-name: screen-recording-qa
+name: validate-with-recording
 description: Validate that a web application actually works by recording the browser while driving it, then judging the recording against a rubric. Use when asked to check, verify, test, or QA a web app's behaviour in a real browser — especially for anything involving loading states, animations, timing, flicker, layout shift, or transient UI like toasts, where discrete screenshots are not enough.
 ---
 

@@ -5,7 +5,7 @@ import { sampleGrayFrames, extractFrame, fitToBytes, videoInfo, readAsBase64 } f
 import { scoreFrames } from "./delta.mjs";
 import { selectKeyframes, DEFAULTS } from "./select.mjs";
 import { buildContactSheet } from "./sheet.mjs";
-import { planImages, estimateTokens, fitText } from "./budget.mjs";
+import { planImages, estimateTokens, allocateText, clampText } from "./budget.mjs";
 import { buildTimeline, formatTimeline } from "./timeline.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
@@ -106,48 +106,75 @@ export async function analyzeVideo({
   const timelineText = formatTimeline(rows, { sampleFps });
 
   // ---- assemble the response -------------------------------------------------
+  //
+  // Built as explicit blocks with a budget computed over all of them. The previous
+  // version concatenated header and timeline, trimmed that, then recovered the two
+  // halves by splitting on the literal "\n\nTIMELINE" — so a rubric long enough to
+  // truncate inside the header made the marker disappear and silently dropped the
+  // entire timeline, while the captions it never counted pushed the payload over the
+  // token ceiling.
   const imageCount = (sheet ? 1 : 0) + detailFiles.length;
+
+  const sheetCaption = sheet
+    ? `CONTACT SHEET — ${sheet.count} keyframes, ${sheet.cols}x${sheet.rows}, read left to ` +
+      `right then top to bottom. Each cell is labelled with its frame number and ` +
+      `timestamp; red-outlined cells are the largest visual changes.`
+    : null;
+
+  const detailCaptions = detailFiles.map(
+    (f, i) =>
+      `DETAIL ${i + 1}/${detailFiles.length} — t=${f.t.toFixed(2)}s · ` +
+      `change=${f.delta.toFixed(3)} · selected because: ${f.reasons.join(", ")}`
+  );
+
+  const linkDescription =
+    `Full recording (${duration ? duration.toFixed(1) + "s" : "unknown length"}). ` +
+    `Use get_frames to inspect any moment at full resolution.`;
+
   const header = buildHeader({
     video, label, info, from, to: rangeTo, keyframes, transitions,
     events, rubric, focus, notes, sheet, detailFiles, plan,
   });
-  const fitted = fitText(`${header}\n\n${timelineText}`, { images: imageCount });
+
+  const fixedChars =
+    (sheetCaption?.length ?? 0) +
+    detailCaptions.reduce((n, c) => n + c.length, 0) +
+    linkDescription.length;
+
+  const budget = allocateText({ images: imageCount, fixedChars });
+  const fittedHeader = clampText(
+    header,
+    budget.header,
+    "header trimmed to fit the MCP output budget; the rubric above may be incomplete."
+  );
+  const fittedTimeline = clampText(
+    timelineText,
+    budget.timeline,
+    "timeline trimmed to fit the MCP output budget. Use get_frames with a time range to inspect any period in full."
+  );
 
   const content = [];
-  const headerAndTimeline = fitted.text.split("\n\nTIMELINE");
-  content.push({ type: "text", text: headerAndTimeline[0] });
+  content.push({ type: "text", text: fittedHeader.text });
 
   if (sheet) {
     const sheetFit = await fitToBytes(sheet.path, { maxLongEdge: 1456 });
-    content.push({
-      type: "text",
-      text:
-        `CONTACT SHEET — ${sheet.count} keyframes, ${sheet.cols}x${sheet.rows}, read left to ` +
-        `right then top to bottom. Each cell is labelled with its frame number and ` +
-        `timestamp; red-outlined cells are the largest visual changes.`,
-    });
+    content.push({ type: "text", text: sheetCaption });
     content.push(imageContent(sheetFit.path, returnMode));
   }
 
   detailFiles.forEach((f, i) => {
-    content.push({
-      type: "text",
-      text:
-        `DETAIL ${i + 1}/${detailFiles.length} — t=${f.t.toFixed(2)}s · ` +
-        `change=${f.delta.toFixed(3)} · selected because: ${f.reasons.join(", ")}`,
-    });
+    content.push({ type: "text", text: detailCaptions[i] });
     content.push(imageContent(f.path, returnMode));
   });
 
-  if (headerAndTimeline[1]) {
-    content.push({ type: "text", text: `TIMELINE${headerAndTimeline[1]}` });
-  }
+  // Always present, never recovered by string-splitting.
+  content.push({ type: "text", text: fittedTimeline.text });
 
   content.push({
     type: "resource_link",
     uri: pathToFileURL(video).href,
     name: path.basename(video),
-    description: `Full recording (${duration ? duration.toFixed(1) + "s" : "unknown length"}). Use get_frames to inspect any moment at full resolution.`,
+    description: linkDescription,
     mimeType: video.endsWith(".mov") ? "video/quicktime" : "video/mp4",
   });
 
@@ -159,15 +186,20 @@ export async function analyzeVideo({
     height: info.height,
     analyzedRange: { from, to: rangeTo ?? duration },
     sampleFps,
-    keyframes: keyframes.map(({ ...k }) => k),
+    keyframes,
     detailFrames: detailFiles.map((f) => ({ t: f.t, path: f.path, reasons: f.reasons })),
     contactSheet: sheet ? sheet.path : null,
     transitionCount: transitions.length,
     events: events.map((e) => ({ t: e.t, type: e.type, tool: e.tool, note: e.note })),
     notes,
-    estimatedTokens: estimateTokens({ images: imageCount, textChars: fitted.text.length }),
+    estimatedTokens: estimateTokens({
+      images: imageCount,
+      textChars: content.reduce((n, c) => n + (c.type === "text" ? c.text.length : 0), 0) +
+        linkDescription.length,
+    }),
     tokenCeiling: plan.ceiling,
-    timelineTruncated: fitted.truncated,
+    timelineTruncated: fittedTimeline.truncated,
+    headerTruncated: fittedHeader.truncated,
   };
 
   return { content, structuredContent };

@@ -43,16 +43,20 @@ export async function sampleGrayFrames(video, { sampleFps = 4, from = 0, to = nu
   return frames;
 }
 
+/**
+ * Downscale so the *long* edge fits, whichever way round the frame is, and never
+ * upscale. Shared so the extract and re-encode paths cannot disagree: the re-encode
+ * path used to constrain width only, which left portrait recordings untouched.
+ */
+function longEdgeScale(maxLongEdge) {
+  return `scale='if(gt(iw,ih),min(iw,${maxLongEdge}),-2)':'if(gt(iw,ih),-2,min(ih,${maxLongEdge}))'`;
+}
+
 /** Extract one full-resolution still at an exact timestamp. */
 export async function extractFrame(video, t, outPath, { maxLongEdge = null, quality = 3 } = {}) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   const filters = [];
-  if (maxLongEdge) {
-    // Only ever downscale; upscaling a small window wastes tokens on nothing.
-    filters.push(
-      `scale='if(gt(iw,ih),min(iw,${maxLongEdge}),-2)':'if(gt(iw,ih),-2,min(ih,${maxLongEdge}))'`
-    );
-  }
+  if (maxLongEdge) filters.push(longEdgeScale(maxLongEdge));
   const args = ["-ss", String(Math.max(0, t)), "-i", video, "-frames:v", "1"];
   if (filters.length) args.push("-vf", filters.join(","));
   args.push("-q:v", String(quality), "-y", outPath);
@@ -83,7 +87,7 @@ export async function fitToBytes(imgPath, { maxBytes = 180_000, maxLongEdge = 14
   for (const step of ladder) {
     await ffmpeg([
       "-i", imgPath,
-      "-vf", `scale='min(iw,${step.edge})':-2`,
+      "-vf", longEdgeScale(step.edge),
       "-q:v", String(step.q),
       "-y", tmp,
     ]);

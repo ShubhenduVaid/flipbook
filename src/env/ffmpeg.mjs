@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
 import { PLUGIN_ROOT } from "./paths.mjs";
 
@@ -11,12 +10,12 @@ const require = createRequire(import.meta.url);
 let cached = null;
 
 /** Forget the resolved binary, so a repair can be picked up without a restart. */
-export function clearFfmpegCache() {
+function clearFfmpegCache() {
   cached = null;
 }
 
 /** True when the package is installed but its downloaded binary is absent. */
-export function bundledFfmpegNeedsRepair() {
+function bundledFfmpegNeedsRepair() {
   try {
     const p = require("ffmpeg-static");
     return typeof p === "string" && !fs.existsSync(p);
@@ -91,13 +90,6 @@ export function resolveFfmpeg() {
       ", or install a system ffmpeg with `brew install ffmpeg`. " +
       "You can also point FLIPBOOK_FFMPEG at an existing binary."
   );
-}
-
-export function resolveFfprobe() {
-  const ff = resolveFfmpeg();
-  // ffmpeg-static ships no ffprobe; only a sibling system install would have one.
-  const sibling = path.join(path.dirname(ff), "ffprobe");
-  return fs.existsSync(sibling) ? sibling : null;
 }
 
 /** Run ffmpeg. Non-zero exit rejects with stderr attached, which is where ffmpeg talks. */

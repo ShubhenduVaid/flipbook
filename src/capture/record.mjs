@@ -38,10 +38,12 @@ async function startWindowCapture({ id, outPath, bundleId, windowId, titleContai
   const ready = new Promise((resolve, reject) => {
     const onData = (chunk) => {
       stderrBuf += chunk.toString();
-      let idx;
-      while ((idx = stderrBuf.indexOf("\n")) !== -1) {
-        const line = stderrBuf.slice(0, idx).trim();
-        stderrBuf = stderrBuf.slice(idx + 1);
+      // Split into complete lines and keep the trailing partial one in the buffer;
+      // sckrec emits one JSON object per line and a chunk can land mid-object.
+      const lines = stderrBuf.split("\n");
+      stderrBuf = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
         if (!line) continue;
         let ev;
         try {
@@ -256,6 +258,3 @@ export async function stopRecording(id, { timeoutMs = 20_000 } = {}) {
   };
 }
 
-export function getRecording(id) {
-  return active.get(id) || null;
-}

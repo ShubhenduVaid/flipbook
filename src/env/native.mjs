@@ -7,7 +7,7 @@ import { frontmostChromeWindow, boundsMatch, isChrome } from "./chrome.mjs";
 
 const execFileAsync = promisify(execFile);
 
-export const SOURCE = path.join(PLUGIN_ROOT, "native", "sckrec.swift");
+const SOURCE = path.join(PLUGIN_ROOT, "native", "sckrec.swift");
 export const BINARY = path.join(NATIVE_DIR, "sckrec");
 
 /** Rebuild when the source is newer than the binary, so edits never go stale. */

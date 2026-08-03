@@ -31,7 +31,9 @@ export function describeEvent(ev) {
  */
 export function buildTimeline({ scored, events = [], keyframes = [], quietDelta = 0.02, maxRows = 220 }) {
   const frameAt = new Map();
-  keyframes.forEach((f, i) => frameAt.set(f.index, i + 1));
+  keyframes.forEach((f, i) => {
+    frameAt.set(f.index, i + 1);
+  });
 
   const rows = [];
   let quietRun = 0;

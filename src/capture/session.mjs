@@ -1,10 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { SESSIONS_DIR, ACTIVE_SESSION_FILE, ensureDirs, sessionDir } from "../env/paths.mjs";
+import {
+  SESSIONS_DIR, ACTIVE_SESSION_FILE, ensureDirs, sessionDir, isValidSessionId,
+} from "../env/paths.mjs";
+
+export { isValidSessionId };
 
 /** Sortable, human-readable, collision-resistant: 20260802-114900-a1b2. */
-export function newSessionId() {
+function newSessionId() {
   const d = new Date();
   const p = (n, w = 2) => String(n).padStart(w, "0");
   const stamp =
@@ -28,15 +32,21 @@ export function createSession(meta) {
   return full;
 }
 
-export function metaPath(id) {
+function metaPath(id) {
   return path.join(sessionDir(id), "meta.json");
 }
 
-export function writeMeta(id, meta) {
+function writeMeta(id, meta) {
   fs.writeFileSync(metaPath(id), JSON.stringify(meta, null, 2));
 }
 
+/**
+ * Look up a session. A malformed id is "no such session", not an exception — callers
+ * use a null return to produce their own message, and a lookup should not throw just
+ * because someone passed a bad string.
+ */
 export function readMeta(id) {
+  if (!isValidSessionId(id)) return null;
   const p = metaPath(id);
   if (!fs.existsSync(p)) return null;
   try {
@@ -57,7 +67,9 @@ export function listSessions({ limit = 25 } = {}) {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
   return fs
     .readdirSync(SESSIONS_DIR)
-    .filter((d) => fs.existsSync(metaPath(d)))
+    // Skip anything that is not a session directory; sessionDir now rejects
+    // non-conforming names, and a stray file should not break the listing.
+    .filter((d) => isValidSessionId(d) && fs.existsSync(metaPath(d)))
     .sort()
     .reverse()
     .slice(0, limit)
@@ -78,7 +90,8 @@ export function setActiveSession(id) {
 export function getActiveSession() {
   if (!fs.existsSync(ACTIVE_SESSION_FILE)) return null;
   const id = fs.readFileSync(ACTIVE_SESSION_FILE, "utf8").trim();
-  return id || null;
+  // The pointer is a file on disk, so treat its contents as untrusted too.
+  return isValidSessionId(id) ? id : null;
 }
 
 export function eventsPath(id) {

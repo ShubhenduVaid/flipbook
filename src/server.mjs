@@ -3,16 +3,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { runDoctor, formatDoctor } from "./env/doctor.mjs";
-import { ensureDirs, DATA_HOME } from "./env/paths.mjs";
+import { ensureDirs, DATA_HOME, PLUGIN_ROOT } from "./env/paths.mjs";
 import { listSessions } from "./capture/session.mjs";
 import { registerCaptureTools } from "./tools/capture-tools.mjs";
 import { registerAnalysisTools } from "./tools/analysis-tools.mjs";
 
+// Identity comes from package.json so a release only has to bump the manifests. A
+// literal here drifts silently — nothing was comparing it against anything.
+const PKG = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "package.json"), "utf8"));
+
 ensureDirs();
 
 const server = new McpServer(
-  { name: "flipbook", version: "1.0.0" },
+  { name: PKG.name, version: PKG.version },
   {
     instructions:
       "Records a browser window while Claude drives it, then returns visual evidence " +

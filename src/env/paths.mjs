@@ -28,6 +28,29 @@ export function ensureDirs() {
   }
 }
 
+/** The exact shape newSessionId() produces: 20260803-101010-a1b2. */
+export const SESSION_ID_PATTERN = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
+
+export function isValidSessionId(id) {
+  return typeof id === "string" && SESSION_ID_PATTERN.test(id);
+}
+
+/**
+ * Every session path is derived from here, so this is the one place that has to
+ * refuse a hostile id.
+ *
+ * Session ids arrive as MCP tool arguments, which makes them caller-controlled. Left
+ * unchecked, path.join walks straight out of the data directory: a traversing id
+ * resolved to /tmp/…/events.jsonl, and `mark` would then append there. Validating at
+ * the chokepoint covers every helper built on it — meta, events, video, frames —
+ * instead of relying on each call site to remember.
+ */
 export function sessionDir(id) {
+  if (!isValidSessionId(id)) {
+    throw new Error(
+      `invalid session id ${JSON.stringify(id)} — expected the form 20260803-101010-a1b2. ` +
+        `Use list_recordings to see valid ids.`
+    );
+  }
   return path.join(SESSIONS_DIR, id);
 }

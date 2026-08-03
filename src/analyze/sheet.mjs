@@ -11,7 +11,7 @@ const FONT_CANDIDATES = [
 ];
 
 let fontCache;
-export function resolveFont() {
+function resolveFont() {
   if (fontCache !== undefined) return fontCache;
   fontCache = FONT_CANDIDATES.find((f) => fs.existsSync(f)) || null;
   return fontCache;

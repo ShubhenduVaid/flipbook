@@ -1,6 +1,6 @@
 {
   "name": "flipbook",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read.",
@@ -17,7 +17,10 @@
   "scripts": {
     "build:native": "node scripts/build-native.mjs",
     "doctor": "node scripts/doctor-cli.mjs",
+    "lint": "npx --yes @biomejs/biome check .",
+    "lint:fix": "npx --yes @biomejs/biome check --write .",
     "lint:manifests": "node scripts/lint-manifests.mjs",
+    "validate": "node scripts/validate.mjs",
     "test": "node --test \"test/unit/*.test.mjs\"",
     "test:mcp": "node test/mcp-check.mjs",
     "test:e2e": "node test/fixture-run.mjs --front --seconds 10",

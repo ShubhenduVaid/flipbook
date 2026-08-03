@@ -1,7 +1,7 @@
 {
   "name": "flipbook",
   "displayName": "Flipbook",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read: a labelled contact sheet, full-resolution detail frames, and a timeline correlated with the actions that caused each change.",
   "author": {
     "name": "Shubhendu Vaid",

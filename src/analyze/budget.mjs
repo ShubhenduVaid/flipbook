@@ -9,7 +9,7 @@
  * nothing else, or six images plus a few thousand characters of timeline.
  */
 export const IMAGE_TOKENS = 1600;
-export const CHARS_PER_TOKEN = 4;
+const CHARS_PER_TOKEN = 4;
 
 export function outputBudget() {
   const n = Number(process.env.MAX_MCP_OUTPUT_TOKENS);
@@ -42,18 +42,33 @@ export function planImages({ maxImages = 6, sheetCells = 16 } = {}) {
   };
 }
 
-/** Trim a text block so images plus text stay inside the no-truncation zone. */
-export function fitText(text, { images }) {
+/**
+ * Split the remaining character allowance between the two variable-length text blocks.
+ *
+ * `fixedChars` must include everything else the response carries — per-image captions
+ * and the resource-link description — because those are text too. Budgeting only the
+ * header and timeline is what pushed a real measured payload over the ceiling it
+ * advertises: six images plus captions plus a long rubric came to more than 12,500
+ * tokens while every individual piece looked fine.
+ *
+ * The timeline gets a guaranteed floor. It is the only channel that describes moments
+ * no image was spent on, and a caller-supplied rubric of arbitrary length must not be
+ * able to starve it — previously a rubric over ~11,000 characters removed the timeline
+ * from the response entirely.
+ */
+export function allocateText({ images, fixedChars = 0 }) {
   const ceiling = safeTokenCeiling();
-  const imageTokens = images * IMAGE_TOKENS;
-  const allowedChars = Math.max(500, (ceiling - imageTokens) * CHARS_PER_TOKEN);
-  if (text.length <= allowedChars) return { text, truncated: false };
-  const keep = Math.floor(allowedChars) - 120;
-  return {
-    text:
-      text.slice(0, keep) +
-      `\n… timeline truncated to fit the MCP output budget. ` +
-      `Use get_frames with a time range to inspect any period in full.`,
-    truncated: true,
-  };
+  const available = (ceiling - images * IMAGE_TOKENS) * CHARS_PER_TOKEN - fixedChars;
+  const total = Math.max(1200, available);
+  const timeline = Math.max(800, Math.floor(total * 0.4));
+  const header = Math.max(400, total - timeline);
+  return { total, header, timeline };
+}
+
+/** Clamp one block to a character budget, saying so in-band when it had to cut. */
+export function clampText(text, maxChars, note) {
+  if (text.length <= maxChars) return { text, truncated: false };
+  const suffix = `\n… ${note}`;
+  const keep = Math.max(0, maxChars - suffix.length);
+  return { text: text.slice(0, keep) + suffix, truncated: true };
 }

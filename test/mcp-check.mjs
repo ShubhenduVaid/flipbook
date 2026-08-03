@@ -24,7 +24,9 @@ const check = (ok, label, detail = "") => {
 };
 
 const transport = new StdioClientTransport({ command: "node", args: [serverPath] });
-const client = new Client({ name: "flipbook-check", version: "1.0.0" });
+// Read rather than hardcode, so this is not a second place a release has to be bumped.
+const PKG = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "utf8"));
+const client = new Client({ name: "flipbook-check", version: PKG.version });
 await client.connect(transport);
 console.log("connected to server\n");
 

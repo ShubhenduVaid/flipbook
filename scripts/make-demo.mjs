@@ -91,7 +91,7 @@ try {
   }
   await sleep(untilStart);
 
-  const rec = await startRecording({
+  await startRecording({
     id: "demo",
     outPath: video,
     target: "window",
