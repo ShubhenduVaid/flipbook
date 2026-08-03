@@ -342,6 +342,122 @@ function tally(dropped) {
   return out;
 }
 
+/** Marks in time order, numbered from 1 the way a caller counts them. */
+export function listMarks(events = []) {
+  return events
+    .filter((e) => e.type === "mark" && e.t != null)
+    .sort((a, b) => a.t - b.t)
+    .map((e, i) => ({ index: i + 1, t: e.t, note: e.note ?? "(unlabelled mark)" }));
+}
+
+/** The listing every mark-resolution error prints, so a miss is self-correcting. */
+export function formatMarkList(marks) {
+  return marks.map((m) => `  ${m.index}  t=${m.t.toFixed(2)}s  "${m.note}"`).join("\n");
+}
+
+/**
+ * Resolve a mark selector to a time.
+ *
+ * Accepts a 1-based index or a case-insensitive substring of a mark's note. Every
+ * failure prints the full list of marks, because the caller wrote those notes and will
+ * recognise the right one immediately — an error that just says "no match" makes them
+ * go and look it up.
+ */
+export function resolveMark(events, selector) {
+  const marks = listMarks(events);
+  if (!marks.length) {
+    throw new Error(
+      "This recording has no marks, so there is nothing for after_mark to resolve. Use " +
+        "absolute at/from/to instead, or call mark during the next recording."
+    );
+  }
+
+  const asIndex =
+    typeof selector === "number"
+      ? selector
+      : /^\d+$/.test(String(selector).trim())
+        ? Number(String(selector).trim())
+        : null;
+
+  if (asIndex != null) {
+    const found = marks.find((m) => m.index === asIndex);
+    if (!found) {
+      throw new Error(
+        `There is no mark ${asIndex}. This recording has ${marks.length} mark(s):\n` +
+          `${formatMarkList(marks)}\nPass a 1-based index or a substring of one of these notes.`
+      );
+    }
+    return found;
+  }
+
+  const needle = String(selector).toLowerCase();
+  const hits = marks.filter((m) => m.note.toLowerCase().includes(needle));
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) {
+    throw new Error(
+      `"${selector}" matches ${hits.length} marks:\n${formatMarkList(hits)}\n` +
+        `Pass the 1-based index, or a longer substring that picks out just one.`
+    );
+  }
+  throw new Error(
+    `No mark matches "${selector}". This recording has ${marks.length} mark(s):\n` +
+      `${formatMarkList(marks)}\nPass a 1-based index or a case-insensitive substring of one of these.`
+  );
+}
+
+/** Asking for "after mark 2" and getting the remaining four minutes is nobody's intent. */
+export const DEFAULT_MARK_WINDOW = 3;
+
+/**
+ * Turn a possibly mark-relative request into absolute times.
+ *
+ * A mark establishes an *origin*: `at`, `from` and `to` are then offsets from it. Every
+ * other tool on this server speaks absolute time, so the result carries both — the
+ * caller thinks in "1.5s after the third mark", the evidence is cited in seconds into
+ * the recording, and neither has to do the arithmetic.
+ */
+export function resolveTimeOrigin({
+  afterMark = null,
+  offset = 0,
+  at = null,
+  from = null,
+  to = null,
+  events = [],
+  duration = null,
+}) {
+  const mark = afterMark != null ? resolveMark(events, afterMark) : null;
+  const base = (mark?.t ?? 0) + (mark ? offset : 0);
+  // Rounded to the same two decimals as alignEvents, so an offset from a mark does not
+  // arrive as 3.8499999999999996 in a caption a human is meant to read.
+  const clamp = (t) => {
+    const lo = Math.max(0, t);
+    return Number((duration != null ? Math.min(lo, duration) : lo).toFixed(2));
+  };
+
+  if (at?.length) {
+    return {
+      mark, offset: mark ? offset : 0, base,
+      at: at.map((t) => clamp(base + t)),
+      from: null, to: null, clamped: at.some((t) => base + t < 0 || (duration != null && base + t > duration)),
+    };
+  }
+
+  const rawFrom = mark ? base + (from ?? 0) : (from ?? 0);
+  const rawTo = mark
+    ? base + (to ?? DEFAULT_MARK_WINDOW)
+    : to != null
+      ? to
+      : (duration ?? null);
+
+  return {
+    mark, offset: mark ? offset : 0, base,
+    at: null,
+    from: clamp(rawFrom),
+    to: rawTo == null ? null : clamp(rawTo),
+    clamped: rawFrom < 0 || (duration != null && rawTo != null && rawTo > duration),
+  };
+}
+
 /**
  * Convert absolute wall-clock event timestamps into seconds from recording start,
  * and drop anything outside the recording window.

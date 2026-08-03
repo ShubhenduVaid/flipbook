@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   alignEvents, buildTimeline, formatTimeline, fitTimeline, formatRow, describeEvent,
-  rowPriority, ROW_TIERS,
+  rowPriority, ROW_TIERS, listMarks, resolveMark, resolveTimeOrigin,
 } from "../../src/analyze/timeline.mjs";
 import { scoredFromDeltas } from "./helpers.mjs";
 
@@ -255,4 +255,86 @@ test("describeEvent caps a runaway mark note so one note cannot starve the timel
   const text = describeEvent({ type: "mark", note: "x".repeat(5000) });
   assert.ok(text.length <= 170, `expected a capped note, got ${text.length} chars`);
   assert.match(text, /…$/);
+});
+
+const MARKS = [
+  { t: 1.2, type: "mark", note: "opened the checkout page" },
+  { t: 4.85, type: "mark", note: "clicked Submit" },
+  { t: 9.1, type: "mark", note: "expect a confirmation toast" },
+  { t: 2.0, type: "tool", tool: "mcp__claude-in-chrome__computer", input: {} },
+  { t: 0, type: "recording_started" },
+];
+
+test("listMarks numbers only the marks, in time order, from one", () => {
+  const marks = listMarks(MARKS);
+  assert.deepEqual(marks.map((m) => m.index), [1, 2, 3]);
+  assert.equal(marks[0].note, "opened the checkout page");
+  assert.equal(marks[2].t, 9.1);
+});
+
+test("resolveMark accepts a 1-based index and a case-insensitive substring", () => {
+  assert.equal(resolveMark(MARKS, 2).note, "clicked Submit");
+  assert.equal(resolveMark(MARKS, "2").note, "clicked Submit");
+  assert.equal(resolveMark(MARKS, "SUBMIT").index, 2);
+  assert.equal(resolveMark(MARKS, "confirmation").t, 9.1);
+});
+
+test("an ambiguous substring names the candidates instead of guessing", () => {
+  assert.throws(
+    () => resolveMark(MARKS, "e"),
+    (err) => /matches 3 marks/.test(err.message) && /clicked Submit/.test(err.message)
+  );
+});
+
+test("a missed substring lists every mark, so the caller can correct it in one step", () => {
+  assert.throws(
+    () => resolveMark(MARKS, "sumbit"),
+    (err) =>
+      /No mark matches "sumbit"/.test(err.message) &&
+      /t=1\.20s/.test(err.message) &&
+      /t=4\.85s/.test(err.message) &&
+      /t=9\.10s/.test(err.message)
+  );
+});
+
+test("an out-of-range index lists the marks too", () => {
+  assert.throws(() => resolveMark(MARKS, 0), /no mark 0/i);
+  assert.throws(() => resolveMark(MARKS, 4), /no mark 4[\s\S]*clicked Submit/);
+});
+
+test("a recording with no marks says so rather than printing an empty list", () => {
+  assert.throws(
+    () => resolveMark([{ t: 1, type: "tool" }], "anything"),
+    /has no marks[\s\S]*absolute at\/from\/to/
+  );
+});
+
+test("resolveTimeOrigin leaves absolute requests alone", () => {
+  const o = resolveTimeOrigin({ at: [1, 2], events: MARKS, duration: 20 });
+  assert.equal(o.mark, null);
+  assert.deepEqual(o.at, [1, 2]);
+});
+
+test("after_mark turns at into offsets from the mark", () => {
+  const o = resolveTimeOrigin({ afterMark: "Submit", at: [0, 1.5], events: MARKS, duration: 20 });
+  assert.equal(o.mark.index, 2);
+  assert.deepEqual(o.at, [4.85, 6.35], "at:[0] is the mark itself");
+});
+
+test("after_mark with no range returns a short window, not the rest of the recording", () => {
+  const o = resolveTimeOrigin({ afterMark: 2, events: MARKS, duration: 240 });
+  assert.equal(o.from, 4.85);
+  assert.equal(o.to, 7.85, "three seconds, not the remaining four minutes");
+});
+
+test("offset shifts the origin, and a negative one can look before the mark", () => {
+  const o = resolveTimeOrigin({ afterMark: 2, offset: -1, events: MARKS, duration: 20 });
+  assert.equal(o.from, 3.85);
+});
+
+test("everything is clamped into the recording", () => {
+  const o = resolveTimeOrigin({ afterMark: 1, offset: -5, at: [0], events: MARKS, duration: 20 });
+  assert.deepEqual(o.at, [0], "a negative time clamps to the start");
+  const past = resolveTimeOrigin({ afterMark: 3, to: 999, events: MARKS, duration: 10 });
+  assert.equal(past.to, 10);
 });
