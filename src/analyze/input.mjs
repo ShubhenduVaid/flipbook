@@ -2,14 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { ffmpeg } from "../env/ffmpeg.mjs";
-import { DATA_HOME } from "../env/paths.mjs";
+import { IMPORTS_DIR } from "../env/paths.mjs";
 
 export const VIDEO_EXTS = new Set([".mov", ".mp4", ".m4v", ".webm", ".gif", ".mkv", ".avi"]);
 export const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"]);
 
 function workDirFor(input) {
   const h = crypto.createHash("sha1").update(path.resolve(input)).digest("hex").slice(0, 10);
-  return path.join(DATA_HOME, "imports", `${path.basename(input).replace(/[^\w.-]/g, "_")}-${h}`);
+  return path.join(IMPORTS_DIR, `${path.basename(input).replace(/[^\w.-]/g, "_")}-${h}`);
 }
 
 /**

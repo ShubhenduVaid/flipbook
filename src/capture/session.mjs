@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
-  SESSIONS_DIR, ACTIVE_SESSION_FILE, ensureDirs, sessionDir, isValidSessionId,
+  SESSIONS_DIR, IMPORTS_DIR, ACTIVE_SESSION_FILE, ensureDirs, sessionDir, isValidSessionId,
 } from "../env/paths.mjs";
 
 export { isValidSessionId };
@@ -63,7 +63,8 @@ export function updateMeta(id, patch) {
   return next;
 }
 
-export function listSessions({ limit = 25 } = {}) {
+/** Every session id on disk, newest first. */
+export function allSessionIds() {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
   return fs
     .readdirSync(SESSIONS_DIR)
@@ -71,10 +72,120 @@ export function listSessions({ limit = 25 } = {}) {
     // non-conforming names, and a stray file should not break the listing.
     .filter((d) => isValidSessionId(d) && fs.existsSync(metaPath(d)))
     .sort()
-    .reverse()
+    .reverse();
+}
+
+export function listSessions({ limit = 25, withSize = false } = {}) {
+  return allSessionIds()
     .slice(0, limit)
-    .map((id) => readMeta(id))
+    .map((id) => {
+      const meta = readMeta(id);
+      if (!meta) return null;
+      return withSize ? { ...meta, bytes: sessionSize(id).bytes, reclaimable: isReclaimable(meta) } : meta;
+    })
     .filter(Boolean);
+}
+
+/**
+ * Whether a session's evidence was ever actually looked at.
+ *
+ * Status alone is not enough: only stop_recording writes status "analyzed", while
+ * analyze_recording and get_frames leave it at "recorded" — so a session analysed five
+ * minutes ago would otherwise be offered up for deletion. Those tools stamp
+ * lastAnalyzedAt for exactly this reason.
+ */
+export function isReclaimable(meta) {
+  return (meta.status === "recorded" || meta.status === "failed") && meta.lastAnalyzedAt == null;
+}
+
+/**
+ * Recursive byte total, never following symlinks.
+ *
+ * rmSync(recursive) does not follow them either, so counting a link's target would make
+ * prune's dry run promise space it cannot free.
+ */
+export function dirSize(dir) {
+  let total = 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    try {
+      if (entry.isDirectory()) total += dirSize(p);
+      else total += fs.lstatSync(p).size;
+    } catch {
+      // A file vanishing mid-walk is not worth failing a listing over.
+    }
+  }
+  return total;
+}
+
+/**
+ * Bytes in one session, broken down.
+ *
+ * Measured, not read from meta.bytes — that records only the .mov, while frames/ and
+ * frames/drilldown/ grow every time get_frames is called.
+ */
+export function sessionSize(id) {
+  let dir;
+  try {
+    dir = sessionDir(id);
+  } catch {
+    return { bytes: 0, video: 0, frames: 0, other: 0 };
+  }
+  const video = fs.existsSync(videoPath(id)) ? fs.lstatSync(videoPath(id)).size : 0;
+  const frames = dirSize(framesDir(id));
+  const bytes = dirSize(dir);
+  return { bytes, video, frames, other: Math.max(0, bytes - video - frames) };
+}
+
+/** Whole-store accounting, across every session rather than one listed page. */
+export function totalFootprint() {
+  let bytes = 0;
+  let reclaimableBytes = 0;
+  let reclaimableCount = 0;
+  const ids = allSessionIds();
+  for (const id of ids) {
+    const size = sessionSize(id).bytes;
+    bytes += size;
+    const meta = readMeta(id);
+    if (meta && isReclaimable(meta)) {
+      reclaimableBytes += size;
+      reclaimableCount++;
+    }
+  }
+  return {
+    sessions: ids.length,
+    bytes,
+    reclaimableBytes,
+    reclaimableCount,
+    importsBytes: fs.existsSync(IMPORTS_DIR) ? dirSize(IMPORTS_DIR) : 0,
+  };
+}
+
+/**
+ * Remove one session directory. The only destructive path in the codebase.
+ *
+ * Deliberately holds no policy about whether a session *should* go — that lives in
+ * planPrune, which is pure and testable. This function's whole job is not escaping the
+ * data directory.
+ */
+export function deleteSession(id) {
+  // sessionDir rejects any id that is not the exact generated shape, which covers every
+  // traversal. The resolve check below is belt and braces: this is the first thing in
+  // the repo that deletes, and it is worth two independent guards.
+  const dir = sessionDir(id);
+  const root = path.resolve(SESSIONS_DIR) + path.sep;
+  if (!path.resolve(dir).startsWith(root)) {
+    throw new Error(`refusing to delete ${dir}: outside ${SESSIONS_DIR}`);
+  }
+  const bytes = dirSize(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { id, bytes };
 }
 
 /**

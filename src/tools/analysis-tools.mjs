@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { readMeta, readEvents, videoPath, framesDir } from "../capture/session.mjs";
+import { readMeta, readEvents, videoPath, framesDir, updateMeta } from "../capture/session.mjs";
 import { analyzeVideo } from "../analyze/analyze.mjs";
 import { alignEvents, resolveTimeOrigin } from "../analyze/timeline.mjs";
 import { resolveInput } from "../analyze/input.mjs";
@@ -90,6 +90,9 @@ export function registerAnalysisTools(server) {
         if (src.note) {
           analysis.content.unshift({ type: "text", text: `NOTE: ${src.note}` });
         }
+        // Only stop_recording sets status "analyzed", so without this a session analysed
+        // here still reads "recorded" and prune would offer it up as never looked at.
+        if (args.session_id) updateMeta(args.session_id, { lastAnalyzedAt: Date.now() });
         return analysis;
       } catch (err) {
         return { isError: true, content: [{ type: "text", text: `Analysis failed: ${err.message}` }] };
@@ -261,6 +264,8 @@ export function registerAnalysisTools(server) {
         );
         produced.push({ t: p.t, path: fitted.path });
       }
+
+      if (args.session_id) updateMeta(args.session_id, { lastAnalyzedAt: Date.now() });
 
       return {
         content,

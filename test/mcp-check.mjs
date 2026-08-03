@@ -36,13 +36,25 @@ const names = tools.map((t) => t.name).sort();
 console.log("tools:", names.join(", "), "\n");
 const expected = [
   "analyze_recording", "doctor", "get_frames", "list_recordings",
-  "mark", "start_recording", "stop_recording",
+  "mark", "prune_recordings", "start_recording", "stop_recording",
 ];
-check(expected.every((n) => names.includes(n)), "all 7 tools registered");
+check(expected.every((n) => names.includes(n)), `all ${expected.length} tools registered`);
 check(
   tools.every((t) => t.description && t.description.length > 40),
   "every tool has a substantive description"
 );
+
+// Every parameter has to explain itself; the tool list is the only documentation the
+// model gets at call time.
+const undocumented = [];
+for (const t of tools) {
+  const props = t.inputSchema?.properties ?? {};
+  for (const [name, spec] of Object.entries(props)) {
+    const described = spec.description || (spec.anyOf ?? []).some((s) => s.description);
+    if (!described) undocumented.push(`${t.name}.${name}`);
+  }
+}
+check(undocumented.length === 0, "every tool parameter is described", undocumented.join(", "));
 
 // --- doctor -----------------------------------------------------------------
 const doc = await client.callTool({ name: "doctor", arguments: {} });
@@ -112,7 +124,79 @@ if (!fs.existsSync(fixtureVideo)) {
     gfAt.content.filter((c) => c.type === "image").length === 2,
     "get_frames honours exact timestamps"
   );
+
+  // A cropped frame must never be mistakable for the whole page.
+  const cropped = await client.callTool({
+    name: "analyze_recording",
+    arguments: { path: fixtureVideo, roi: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, max_images: 2 },
+  });
+  const croppedText = cropped.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+  check(!cropped.isError, "analyze_recording accepts an explicit roi", cropped.content[0]?.text);
+  check(/CROPPED VIEW/.test(croppedText), "a cropped analysis says so in the header");
+  check(
+    cropped.content.filter((c) => c.type === "text" && /^\[CROP /.test(c.text)).length >= 2,
+    "and on every image caption"
+  );
+  check(
+    cropped.structuredContent?.roi?.applied === true,
+    "structuredContent.roi records the crop"
+  );
+
+  const uncropped = await client.callTool({
+    name: "analyze_recording",
+    arguments: { path: fixtureVideo, max_images: 2 },
+  });
+  check(
+    uncropped.structuredContent?.roi?.applied === false,
+    "and is present but false when nothing was cropped, so its absence cannot mislead"
+  );
+
+  const badRoi = await client.callTool({
+    name: "get_frames",
+    arguments: { path: fixtureVideo, roi: "auto", at: [1] },
+  });
+  check(badRoi.isError === true, 'get_frames refuses roi:"auto" with an explanation');
+
+  const noMarks = await client.callTool({
+    name: "get_frames",
+    arguments: { path: fixtureVideo, after_mark: "anything" },
+  });
+  check(noMarks.isError === true, "after_mark on a path source errors cleanly");
 }
+
+// --- prune ------------------------------------------------------------------
+const pruneEmpty = await client.callTool({ name: "prune_recordings", arguments: {} });
+check(pruneEmpty.isError === true, "prune_recordings refuses a request with no selectors");
+
+const pruneConfirmOnly = await client.callTool({
+  name: "prune_recordings",
+  arguments: { confirm: true },
+});
+check(
+  pruneConfirmOnly.isError === true,
+  "prune_recordings refuses confirm without a selector, rather than deleting everything"
+);
+
+const pruneDry = await client.callTool({
+  name: "prune_recordings",
+  arguments: { only_unanalyzed: true },
+});
+check(!pruneDry.isError, "prune_recordings dry run runs", pruneDry.content[0]?.text);
+check(pruneDry.structuredContent?.dryRun === true, "and is a dry run by default");
+check(
+  (pruneDry.structuredContent?.deleted ?? []).length === 0,
+  "deleting nothing without confirm:true"
+);
+check(
+  /DRY RUN/.test(pruneDry.content.find((c) => c.type === "text")?.text ?? ""),
+  "and saying so unmistakably"
+);
+
+const listed = await client.callTool({ name: "list_recordings", arguments: { limit: 5 } });
+check(
+  typeof listed.structuredContent?.footprint?.bytes === "number",
+  "list_recordings reports the total footprint"
+);
 
 // --- error handling ---------------------------------------------------------
 const bad = await client.callTool({ name: "analyze_recording", arguments: { path: "/nope/missing.mov" } });

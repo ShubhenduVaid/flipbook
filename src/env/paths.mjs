@@ -19,6 +19,13 @@ export const DATA_HOME =
 export const SESSIONS_DIR = path.join(DATA_HOME, "sessions");
 export const NATIVE_DIR = path.join(DATA_HOME, "bin");
 
+/**
+ * Work directories for videos assembled from stills or GIFs passed by path. Pure derived
+ * data — rebuildable from the user's original file — so it is always safe to delete, but
+ * nothing ever did, and it grows without limit.
+ */
+export const IMPORTS_DIR = path.join(DATA_HOME, "imports");
+
 /** Where the PostToolUse hook and the server agree to meet. */
 export const ACTIVE_SESSION_FILE = path.join(DATA_HOME, "active-session");
 

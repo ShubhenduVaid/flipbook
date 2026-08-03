@@ -4,6 +4,7 @@ import os from "node:os";
 import { resolveFfmpeg, capabilities, listAvfDevices, repairBundledFfmpeg } from "./ffmpeg.mjs";
 import { hasSwift, buildNative, listWindows, BINARY } from "./native.mjs";
 import { DATA_HOME } from "./paths.mjs";
+import { totalFootprint } from "../capture/session.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -191,6 +192,30 @@ async function checkDisk() {
   }
 }
 
+/**
+ * How much disk the tool itself is holding. Reported because nothing ever did: a day of
+ * ordinary use reached 4.5 GB, and it was only noticed when sessions were listed at the
+ * end of it.
+ */
+function checkFootprint() {
+  try {
+    const f = totalFootprint();
+    const size = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(0)} MB`);
+    const detail =
+      `${size(f.bytes)} across ${f.sessions} session(s)` +
+      (f.reclaimableCount
+        ? ` · ${size(f.reclaimableBytes)} in ${f.reclaimableCount} never analysed`
+        : "") +
+      (f.importsBytes ? ` · imports cache ${size(f.importsBytes)}` : "");
+    const fix = "prune_recordings shows what would be freed; it deletes nothing without confirm:true.";
+    if (f.bytes > 5e9 || f.reclaimableBytes > 1e9) return [warn("disk footprint", detail, fix)];
+    return [ok("disk footprint", detail)];
+  } catch {
+    // doctor must never throw; a footprint it cannot measure is not a reason to fail.
+    return [warn("disk footprint", "could not measure recordings on disk")];
+  }
+}
+
 async function checkAvfFallback() {
   try {
     const { screens } = await listAvfDevices();
@@ -215,6 +240,7 @@ export async function runDoctor() {
     ...(await checkChrome()),
     ...(await checkAvfFallback()),
     ...(await checkDisk()),
+    ...checkFootprint(),
   ];
   const failures = checks.filter((c) => c.status === "fail");
   const warnings = checks.filter((c) => c.status === "warn");
