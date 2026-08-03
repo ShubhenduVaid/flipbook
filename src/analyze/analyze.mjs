@@ -8,6 +8,7 @@ import { buildContactSheet } from "./sheet.mjs";
 import { planImages, estimateTokens, allocateText, clampText } from "./budget.mjs";
 import { buildTimeline, fitTimeline } from "./timeline.mjs";
 import { buildSegments, formatSegments, segmentNotes } from "./segments.mjs";
+import { findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote } from "./anomaly.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -76,6 +77,18 @@ export async function analyzeVideo({
   // analysis makes rather than one the reader has to reconstruct from the delta column.
   const segments = buildSegments(scored, events);
   notes.push(...segmentNotes(segments));
+
+  // Did the capture stop being about the app partway through? Both detectors must see
+  // the whole frame, so they run before any region of interest is applied — a viewport
+  // that shrank into a corner is invisible once the corner is all that is left.
+  const geometryJumps = findGeometryJumps(scored);
+  const flatOnset = findFlatOnset(scored, { sampleFps });
+  const anomalies = [
+    ...geometryJumps.map((j) => ({ type: "geometry-change", t: j.t, detail: j })),
+    ...(flatOnset ? [{ type: "flat-onset", t: flatOnset.t, detail: flatOnset }] : []),
+  ];
+  for (const j of geometryJumps) notes.push(geometryNote(j));
+  if (flatOnset) notes.push(flatOnsetNote(flatOnset));
 
   const aspect = info.width && info.height ? info.width / info.height : 1.5;
   const sheet = await buildContactSheet(video, keyframes, outDir, { videoAspect: aspect });
@@ -199,6 +212,7 @@ export async function analyzeVideo({
     contactSheet: sheet ? sheet.path : null,
     transitionCount: transitions.length,
     segments,
+    anomalies,
     events: events.map((e) => ({ t: e.t, type: e.type, tool: e.tool, note: e.note })),
     notes,
     estimatedTokens: estimateTokens({
