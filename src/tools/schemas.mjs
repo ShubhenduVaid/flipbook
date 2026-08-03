@@ -27,3 +27,30 @@ export const roiSchema = z
       "region: do not describe the rest of the page from one, and do not treat something " +
       "missing from it as absent from the page."
   );
+
+/**
+ * Accepted by stop_recording and analyze_recording. The description has one job beyond
+ * describing the parameter: stopping the clip being requested as evidence. It is for the
+ * person who asked, and it shows Claude nothing the frames do not.
+ */
+export const clipSchema = z
+  .object({
+    from: z.number().min(0).optional().describe("Start, in seconds from the beginning of the recording."),
+    to: z.number().min(0).optional().describe("End in seconds — relative to `mark` when `mark` is given."),
+    mark: z.union([z.string(), z.number().int().min(1)]).optional()
+      .describe("Start at a mark: a 1-based index, or a substring of its note."),
+    to_mark: z.union([z.string(), z.number().int().min(1)]).optional()
+      .describe("End at a mark instead of at `to`."),
+    format: z.enum(["mp4", "gif"]).optional().describe("mp4 (default) or gif."),
+    fps: z.number().min(1).max(30).optional().describe("Output framerate (default 12 for mp4, 8 for gif)."),
+    width: z.number().int().min(160).max(1280).optional()
+      .describe("Output width in pixels; height follows the aspect (default 720)."),
+  })
+  .optional()
+  .describe(
+    "Also write a short clip and return a link to it. This is for a human to watch and " +
+      "share — after validating something, it is what you hand the person who asked. It " +
+      "costs no image budget, and it shows you nothing you cannot already see in the " +
+      "frames, so do not request one as evidence. Capped at 30 seconds, and never cropped " +
+      "by `roi`."
+  );

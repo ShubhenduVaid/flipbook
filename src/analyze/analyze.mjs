@@ -13,6 +13,7 @@ import {
   framingHint, autoRoi, normalizeRoi, cropFilter, cropPixelsToSample, describeRoi,
   roiCaptionTag, roiPixels,
 } from "./roi.mjs";
+import { resolveClipRange, exportClip, clipDescription, clipPath } from "./clip.mjs";
 
 const DETAIL_LONG_EDGE = 1456;
 
@@ -36,6 +37,7 @@ export async function analyzeVideo({
   label = null,
   focus = null,
   roi = null,
+  clip = null,
 }) {
   if (!fs.existsSync(video)) throw new Error(`recording not found: ${video}`);
   fs.mkdirSync(outDir, { recursive: true });
@@ -209,6 +211,21 @@ export async function analyzeVideo({
     `Full recording (${duration ? duration.toFixed(1) + "s" : "unknown length"}). ` +
     `Use get_frames to inspect any moment at full resolution.`;
 
+  // Never cropped, and never counted against the image budget — but its description is
+  // text, and uncounted text is what pushed a real payload over the ceiling once before.
+  let clipResult = null;
+  let clipText = null;
+  if (clip) {
+    const range = resolveClipRange(clip, { events, duration });
+    const format = clip.format ?? "mp4";
+    const out = clipPath(outDir, { from: range.from, to: range.to, format });
+    const encoded = await exportClip(video, out, {
+      from: range.from, to: range.to, format, fps: clip.fps ?? null, width: clip.width ?? null,
+    });
+    clipResult = encoded;
+    clipText = clipDescription(encoded, range);
+  }
+
   const header = buildHeader({
     video, label, info, from, to: rangeTo, keyframes, transitions,
     events, rubric, focus, notes, sheet, detailFiles, plan, segments, roiState,
@@ -217,7 +234,8 @@ export async function analyzeVideo({
   const fixedChars =
     (sheetCaption?.length ?? 0) +
     detailCaptions.reduce((n, c) => n + c.length, 0) +
-    linkDescription.length;
+    linkDescription.length +
+    (clipText?.length ?? 0);
 
   const budget = allocateText({ images: imageCount, fixedChars });
   const fittedHeader = clampText(
@@ -259,6 +277,16 @@ export async function analyzeVideo({
     mimeType: video.endsWith(".mov") ? "video/quicktime" : "video/mp4",
   });
 
+  if (clipResult) {
+    content.push({
+      type: "resource_link",
+      uri: pathToFileURL(clipResult.path).href,
+      name: path.basename(clipResult.path),
+      description: clipText,
+      mimeType: clipResult.format === "gif" ? "image/gif" : "video/mp4",
+    });
+  }
+
   const structuredContent = {
     video,
     label,
@@ -270,6 +298,12 @@ export async function analyzeVideo({
     keyframes,
     detailFrames: detailFiles.map((f) => ({ t: f.t, path: f.path, reasons: f.reasons })),
     contactSheet: sheet ? sheet.path : null,
+    clip: clipResult
+      ? {
+          path: clipResult.path, format: clipResult.format, bytes: clipResult.bytes,
+          from: clipResult.from, to: clipResult.to, seconds: clipResult.seconds,
+        }
+      : null,
     transitionCount: transitions.length,
     segments,
     anomalies,

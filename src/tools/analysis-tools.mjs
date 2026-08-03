@@ -10,7 +10,7 @@ import { scoreFrames } from "../analyze/delta.mjs";
 import { selectKeyframes } from "../analyze/select.mjs";
 import { planImages } from "../analyze/budget.mjs";
 import { normalizeRoi, cropFilter, roiCaptionTag, describeRoi } from "../analyze/roi.mjs";
-import { roiSchema } from "./schemas.mjs";
+import { roiSchema, clipSchema } from "./schemas.mjs";
 
 /** Both tools accept either a stored session or an arbitrary file on disk. */
 async function resolveSource({ session_id, path: inputPath }) {
@@ -60,6 +60,7 @@ export function registerAnalysisTools(server) {
         sample_fps: z.number().min(0.5).max(15).optional().describe("Analysis sampling rate (default 4)."),
         return_mode: z.enum(["inline", "paths"]).optional().describe("inline (default) embeds images; paths returns file paths."),
         roi: roiSchema,
+        clip: clipSchema,
       },
     },
     async (args) => {
@@ -84,6 +85,7 @@ export function registerAnalysisTools(server) {
           label: src.meta?.label ?? null,
           focus: args.focus ?? null,
           roi: args.roi ?? null,
+          clip: args.clip ?? null,
         });
         if (src.note) {
           analysis.content.unshift({ type: "text", text: `NOTE: ${src.note}` });
