@@ -202,10 +202,15 @@ async function checkNaming(files) {
     : fail("N1", "one source of truth for name and version", strays.join(", "));
 
   // N2 — stale identities from earlier renames.
+  //
+  // This file and the rubric are exempt because they necessarily contain the very
+  // names they search for. Without the exemption the check fails on itself — which it
+  // did in CI, and not locally, because the untracked file was invisible to the scan.
+  const selfReferential = new Set(["scripts/validate.mjs", "docs/VALIDATION-RUBRIC.md"]);
   const stale = ["video-qa", "video-mcp", "VIDEO_QA", "browser-replay"];
   const hits = [];
   for (const f of files) {
-    if (f === "docs/VALIDATION-RUBRIC.md" || f.startsWith("docs/") && f.endsWith(".jpg")) continue;
+    if (selfReferential.has(f) || (f.startsWith("docs/") && f.endsWith(".jpg"))) continue;
     let content;
     try {
       content = read(f);
