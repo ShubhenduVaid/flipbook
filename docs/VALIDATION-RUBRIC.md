@@ -35,6 +35,9 @@ from the README rather than softened.
 | P8 | Capture works while the browser is **occluded** | `npm run test:e2e:occluded` (MANUAL) |
 | P9 | User-supplied `.mov`, `.gif` and stills directories are analysable | `analyze_recording` with `path` (MANUAL — needs ffmpeg) |
 | P10 | Recording does not interfere with Claude-in-Chrome tools | Drive the browser during a capture (MANUAL) |
+| P11 | A **`mark` is never dropped** from the timeline, however long the recording | 20 marks over 5,000 synthetic rows through a 600-character budget |
+| P12 | Every note the analysis can emit states **evidence, never a verdict** | Call the four note builders directly and scan their output |
+| P13 | Pruning **deletes nothing** without an explicit selector and confirmation | `planPrune` refuses `{}` and `{confirm: true}` |
 
 ## N — Naming
 
@@ -62,6 +65,7 @@ The tool records screens and spawns processes. Both deserve scrutiny.
 | S4 | Recordings stay under `FLIPBOOK_HOME` and are never uploaded | Path construction confined to `DATA_HOME` |
 | S5 | The hook cannot break the tool call it observes | `hooks/record-action.mjs` exits 0 on every path |
 | S6 | Nothing in the published tree contains a real screen capture | No tracked `.mov`/`.mp4`, and the demo image is from a throwaway profile |
+| S7 | **Deletion** cannot escape the data directory | The traversal set is refused by `deleteSession`, which is the only destructive path |
 
 ## Q — Quality
 
@@ -73,6 +77,7 @@ The tool records screens and spawns processes. Both deserve scrutiny.
 | Q4 | MCP protocol suite passes | `npm run test:mcp` (MANUAL) |
 | Q5 | Every MCP tool has a substantive description and an input schema | `tools/list` over a live server |
 | Q6 | Error paths return actionable messages, not stack traces | Missing file, bad type, no source |
+| Q7 | Every tool parameter **describes itself** | The tool list is the only documentation available at call time |
 
 ## D — Docs
 
@@ -82,6 +87,7 @@ The tool records screens and spawns processes. Both deserve scrutiny.
 | D2 | The README's numeric claims are true (unit test count, protocol check count) | Compare against actual counts |
 | D3 | Every tool in the README's table exists on the server, and vice versa | Compare table against `tools/list` |
 | D4 | The two documented ways to record nothing are still accurate | Present in README and surfaced by `doctor` |
+| D5 | Every finding the analysis can emit is **explained in the skill** | A finding the model cannot act on is a finding wasted |
 
 ---
 

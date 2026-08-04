@@ -1,3 +1,5 @@
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import {
   createSession, updateMeta, readMeta, setActiveSession, getActiveSession,
@@ -7,6 +9,8 @@ import { startRecording, stopRecording, isRecording, activeRecordings } from "..
 import { analyzeVideo } from "../analyze/analyze.mjs";
 import { alignEvents } from "../analyze/timeline.mjs";
 import { probeDuration } from "../env/ffmpeg.mjs";
+import { roiSchema, clipSchema } from "./schemas.mjs";
+import { resolveClipRange, exportClip, clipDescription, clipPath } from "../analyze/clip.mjs";
 
 export function registerCaptureTools(server) {
   server.registerTool(
@@ -156,9 +160,11 @@ export function registerCaptureTools(server) {
         return_mode: z.enum(["inline", "paths"]).optional()
           .describe("inline (default) embeds images; paths returns file paths to open with Read."),
         analyze: z.boolean().optional().describe("Set false to just stop and keep the file."),
+        roi: roiSchema,
+        clip: clipSchema,
       },
     },
-    async ({ session_id, rubric, max_images, return_mode, analyze = true }) => {
+    async ({ session_id, rubric, max_images, return_mode, analyze = true, roi, clip }) => {
       const id = session_id ?? getActiveSession();
       if (!id) {
         return { isError: true, content: [{ type: "text", text: "No active recording." }] };
@@ -204,18 +210,45 @@ export function registerCaptureTools(server) {
         stoppedAtMs: Date.now(),
       });
 
+      const events = alignEvents(readEvents(id), meta.startedAtMs, durationSec);
+
       if (!analyze) {
+        // This branch never reaches analyzeVideo, so a requested clip has to be cut here
+        // or it would be silently dropped.
+        const content = [{
+          type: "text",
+          text: `Stopped ${id}. ${(result.bytes / 1e6).toFixed(1)} MB, ` +
+            `${(durationSec ?? 0).toFixed(1)}s at ${result.outPath}`,
+        }];
+        let cut = null;
+        if (clip) {
+          try {
+            const range = resolveClipRange(clip, { events, duration: durationSec });
+            const format = clip.format ?? "mp4";
+            cut = await exportClip(
+              result.outPath,
+              clipPath(framesDir(id), { from: range.from, to: range.to, format }),
+              { from: range.from, to: range.to, format, fps: clip.fps ?? null, width: clip.width ?? null }
+            );
+            content.push({
+              type: "resource_link",
+              uri: pathToFileURL(cut.path).href,
+              name: path.basename(cut.path),
+              description: clipDescription(cut, range),
+              mimeType: format === "gif" ? "image/gif" : "video/mp4",
+            });
+          } catch (err) {
+            content.push({ type: "text", text: `The clip could not be written: ${err.message}` });
+          }
+        }
         return {
-          content: [{
-            type: "text",
-            text: `Stopped ${id}. ${(result.bytes / 1e6).toFixed(1)} MB, ` +
-              `${(durationSec ?? 0).toFixed(1)}s at ${result.outPath}`,
-          }],
-          structuredContent: { session_id: id, video_path: result.outPath, durationSec },
+          content,
+          structuredContent: {
+            session_id: id, video_path: result.outPath, durationSec,
+            clip: cut ? { path: cut.path, format: cut.format, bytes: cut.bytes } : null,
+          },
         };
       }
-
-      const events = alignEvents(readEvents(id), meta.startedAtMs, durationSec);
       const analysis = await analyzeVideo({
         video: result.outPath,
         events,
@@ -224,6 +257,8 @@ export function registerCaptureTools(server) {
         returnMode: return_mode ?? "inline",
         outDir: framesDir(id),
         label: meta.label,
+        roi: roi ?? null,
+        clip: clip ?? null,
       });
       updateMeta(id, { status: "analyzed" });
       return {

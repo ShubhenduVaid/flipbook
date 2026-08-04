@@ -17,13 +17,18 @@ export const SAMPLE_H = 128;
  * keeps analysis of a ten-minute recording to a single decode pass and a couple of
  * megabytes of memory instead of thousands of JPEGs on disk.
  */
-export async function sampleGrayFrames(video, { sampleFps = 4, from = 0, to = null } = {}) {
+export async function sampleGrayFrames(video, { sampleFps = 4, from = 0, to = null, roiFilter = null } = {}) {
   const args = [];
   if (from > 0) args.push("-ss", String(from));
   args.push("-i", video);
   if (to != null) args.push("-t", String(Math.max(0.1, to - from)));
+  // The crop must precede the scale, or it would be cropping the 128x128 thumbnail
+  // rather than the frame. Same rule in extractFrame and in the contact-sheet cells.
+  const vf = [`fps=${sampleFps}`];
+  if (roiFilter) vf.push(roiFilter);
+  vf.push(`scale=${SAMPLE_W}:${SAMPLE_H}`, "format=gray");
   args.push(
-    "-vf", `fps=${sampleFps},scale=${SAMPLE_W}:${SAMPLE_H},format=gray`,
+    "-vf", vf.join(","),
     "-f", "rawvideo",
     "-pix_fmt", "gray",
     "-"
@@ -48,14 +53,22 @@ export async function sampleGrayFrames(video, { sampleFps = 4, from = 0, to = nu
  * upscale. Shared so the extract and re-encode paths cannot disagree: the re-encode
  * path used to constrain width only, which left portrait recordings untouched.
  */
-function longEdgeScale(maxLongEdge) {
+export function longEdgeScale(maxLongEdge) {
   return `scale='if(gt(iw,ih),min(iw,${maxLongEdge}),-2)':'if(gt(iw,ih),-2,min(ih,${maxLongEdge}))'`;
 }
 
 /** Extract one full-resolution still at an exact timestamp. */
-export async function extractFrame(video, t, outPath, { maxLongEdge = null, quality = 3 } = {}) {
+export async function extractFrame(
+  video,
+  t,
+  outPath,
+  { maxLongEdge = null, quality = 3, roiFilter = null } = {}
+) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   const filters = [];
+  // Ahead of the downscale, so `maxLongEdge` bounds the *crop's* long edge — the region
+  // is then upscaled to fill the image budget, which is the whole point of cropping.
+  if (roiFilter) filters.push(roiFilter);
   if (maxLongEdge) filters.push(longEdgeScale(maxLongEdge));
   const args = ["-ss", String(Math.max(0, t)), "-i", video, "-frames:v", "1"];
   if (filters.length) args.push("-vf", filters.join(","));
