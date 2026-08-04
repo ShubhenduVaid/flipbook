@@ -51,23 +51,45 @@ one to `analyze_recording` and Flipbook will decode every frame of it.)
 
 ## Install
 
+**Before you start:** macOS 15+ (window capture uses ScreenCaptureKit), Node 22+, Xcode
+Command Line Tools (`xcode-select --install`), and Google Chrome.
+
+**1. Add the marketplace and install.**
+
 ```bash
 claude plugin marketplace add ShubhenduVaid/flipbook
 claude plugin install flipbook@shubhenduvaid
 ```
 
-Then start Claude with `claude --chrome` and ask it to **run `doctor`**. That finishes
-setup on first run: it compiles the ScreenCaptureKit recorder and restores the bundled
-ffmpeg binary, which Claude Code's installer skips because it installs plugin dependencies
-with `--ignore-scripts`.
+**2. Grant Screen Recording** to your terminal — System Settings → Privacy & Security →
+Screen & System Audio Recording — then **restart the terminal**. This is the one step
+nothing can do for you, and the one most worth getting right: without it macOS records a
+blank screen rather than erroring, so a recording looks like it worked and contains
+nothing.
 
-The one thing `doctor` can't do for you: **grant Screen Recording** to your terminal in
-System Settings → Privacy & Security → Screen & System Audio Recording, then restart it.
-Without it macOS records a blank screen rather than erroring, so `doctor` checks for it
-explicitly.
+**3. Start Claude and run `doctor`.**
 
-Requirements: macOS 15+ (window capture uses ScreenCaptureKit), Node 22+, Xcode Command
-Line Tools (`xcode-select --install`), and Google Chrome.
+```bash
+claude --chrome
+```
+
+Then ask Claude to run `doctor`. It finishes setup on first run — compiling the
+ScreenCaptureKit recorder and restoring the bundled ffmpeg binary, which Claude Code's
+installer skips because it installs plugin dependencies with `--ignore-scripts` — and it
+checks every prerequisite above, including the permission from step 2.
+
+You're ready when `doctor` says so. Warnings are fine; failures are not.
+
+**4. Record something** — see [Usage](#usage) below.
+
+<details>
+<summary>Verify what you installed</summary>
+
+```bash
+claude plugin list                 # name, version, scope, enabled
+claude plugin details flipbook     # what it contributes, and its token cost
+```
+</details>
 
 <details>
 <summary>Run from a clone instead</summary>
@@ -81,8 +103,62 @@ npm run doctor         # preflight every prerequisite
 claude --chrome --plugin-dir "$PWD"
 ```
 
-`--plugin-dir` loads the plugin for one session only.
+`--plugin-dir` loads the plugin for one session only, and takes precedence over an
+installed copy — handy for trying a change without disturbing your install.
 </details>
+
+## Updating
+
+Two steps, because they do different things: the first refreshes the *catalogue*, the
+second installs from it. Doing only the second is the usual reason an update appears to do
+nothing.
+
+```bash
+claude plugin marketplace update shubhenduvaid   # fetch the latest catalogue
+claude plugin update flipbook                    # install it
+```
+
+**Restart Claude Code afterwards.** A running session keeps the version it started with.
+
+Then run `doctor` once in the new session. It recompiles the native recorder if the plugin
+shipped a new one, so a version that changes the recorder is fixed by the same command that
+diagnoses everything else.
+
+```bash
+claude plugin list        # confirm the new version
+```
+
+<details>
+<summary>Updating a clone</summary>
+
+```bash
+git pull
+npm install            # in case dependencies changed
+npm run build:native   # in case the recorder changed
+npm run doctor
+```
+</details>
+
+<details>
+<summary>If an update doesn't take</summary>
+
+- **Version unchanged in `claude plugin list`** — the marketplace catalogue is stale. Run
+  `claude plugin marketplace update` with no name to refresh every marketplace you have.
+- **New tools or parameters missing** — the session predates the update. Restart Claude
+  Code; tool schemas are read once at startup.
+- **Recording fails or returns nothing after an update** — run `doctor`. A recorder
+  compiled against an older plugin is its most likely cause, and `doctor` rebuilds it.
+- **Still wrong** — reinstall cleanly:
+  ```bash
+  claude plugin uninstall flipbook
+  claude plugin install flipbook@shubhenduvaid
+  ```
+  Your recordings live in `~/.flipbook` and are untouched by this.
+</details>
+
+Versions follow [semver](https://semver.org). Released versions are tagged
+`flipbook--v<version>`, so [the tag list](https://github.com/ShubhenduVaid/flipbook/tags)
+is the changelog — each annotated tag says what changed and why.
 
 ## Usage
 
@@ -221,8 +297,32 @@ be averaged away by passing style checks. **[docs/ARCHITECTURE.md](docs/ARCHITEC
 explains the pipeline and what each module owns.
 
 `npm run validate`, `npm test` and the linters run in CI on every push; the rest need macOS,
-Chrome and Screen Recording permission, so they're local checks. Before a release, also run
-`claude plugin validate . --strict`.
+Chrome and Screen Recording permission, so they're local checks.
+
+### Cutting a release
+
+Users get a new version by the two commands under [Updating](#updating), which read the
+marketplace manifest on `main`. So a release is: bump, verify, tag.
+
+1. **Bump the version in all four places** — `package.json`, `package-lock.json`
+   (both the root and `packages.""`), `.claude-plugin/plugin.json` and
+   `.claude-plugin/marketplace.json`. Semver: a new tool or parameter is a *minor*, not a
+   patch. `npm run lint:manifests` fails if they disagree, and rubric criteria N1 and N3
+   cover exactly this.
+2. **Verify**, including the checks CI can't run:
+   ```bash
+   npm run validate && npm run test:mcp && npm run test:e2e
+   claude plugin validate . --strict
+   ```
+3. **Tag it**, once the bump is merged to `main`:
+   ```bash
+   claude plugin tag --dry-run          # check what it would produce
+   claude plugin tag -m "flipbook %s" --push
+   ```
+   `claude plugin tag` creates the `{name}--v{version}` tag this project uses, and refuses
+   if `plugin.json` and the marketplace entry disagree or the tree is dirty — which is why
+   step 1 is worth doing properly. Tag messages are the changelog, so write them for
+   someone deciding whether to update.
 
 Biome is invoked through `npx` rather than added as a devDependency: Claude Code installs
 plugin dependencies without `--omit=dev`, so a devDependency would ship into every user's
