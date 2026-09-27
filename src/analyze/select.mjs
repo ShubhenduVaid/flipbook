@@ -111,6 +111,12 @@ export function selectKeyframes(scored, { events = [], maxFrames = 16, opts = DE
   for (const tr of transitions) {
     add(tr.peakIdx, "peak-change", 10 + tr.peak * 30);
     if (tr.settledIdx != null) add(tr.settledIdx, "settled", 20 + tr.peak * 30);
+    // A run is one contiguous stretch of change, so a loading animation that leads
+    // straight into its result is a single run whose peak is the result arriving — and
+    // the loading state, the transient this tool exists to show, was never nominated.
+    // The first frame of a run is the state the UI changed *into*. Weighted below the
+    // peak and the settled frame so it only spends budget they leave over.
+    if (tr.peakIdx !== tr.startIdx) add(tr.startIdx, "change-onset", 6 + tr.peak * 20);
   }
 
   // A recorded action is a question; the frame ~600ms later is the answer.
