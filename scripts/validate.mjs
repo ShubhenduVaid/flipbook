@@ -489,7 +489,16 @@ async function checkQuality(files) {
     ? pass("Q3", "unit suite passes", `${count} assertions`)
     : fail("Q3", "unit suite passes", (unit.stdout || unit.stderr).split("\n").slice(-4).join(" "));
 
-  if (FULL) {
+  // The protocol suite analyses a synthetic fixture when no macOS recording exists, so
+  // it needs only ffmpeg — it runs wherever that resolves, CI included.
+  let haveFfmpeg = false;
+  try {
+    (await import(path.join(repo, "src/env/ffmpeg.mjs"))).resolveFfmpeg();
+    haveFfmpeg = true;
+  } catch {
+    /* reported as MANUAL below */
+  }
+  if (FULL || haveFfmpeg) {
     const mcp = await run("npm", ["run", "test:mcp"]);
     const n = (mcp.stdout.match(/PASS/g) || []).length;
     mcp.ok
@@ -497,8 +506,8 @@ async function checkQuality(files) {
       : fail("Q4", "MCP protocol suite passes", (mcp.stdout || mcp.stderr).split("\n").slice(-4).join(" "));
     pass("Q5", "every tool has a description and schema", "covered by the protocol suite");
   } else {
-    manual("Q4", "MCP protocol suite passes", "npm run test:mcp");
-    manual("Q5", "every tool has a description and schema", "npm run test:mcp");
+    manual("Q4", "MCP protocol suite passes", "no ffmpeg — npm install, then npm run test:mcp");
+    manual("Q5", "every tool has a description and schema", "no ffmpeg — npm run test:mcp");
   }
 
   // Q6 — error paths must be messages, not stack traces.
@@ -584,6 +593,7 @@ async function checkDocs() {
     : "";
   const mustExplain = [
     "STATIC", "roi", "after_mark", "clip", "device metrics", "stopped painting", "prune_recordings",
+    "NOT labelled", "change-onset", "analysis only",
   ];
   const unexplained = mustExplain.filter((p) => !new RegExp(p.replace(/ /g, "\\s+"), "i").test(skill));
   unexplained.length === 0

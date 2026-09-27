@@ -6,16 +6,27 @@
  * Checks tool discovery, doctor, list_recordings, and a full analyze_recording round
  * trip — including that images come back as native image content blocks rather than
  * base64 stringified into text, which is the assumption the whole design rests on.
+ *
+ * The recording analysed is, in order of preference: FLIPBOOK_FIXTURE_VIDEO, the macOS
+ * fixture run in .fixture-out/front/run.mov, or a synthetic fixture drawn by ffmpeg.
+ * The synthetic one needs no browser, so this whole suite runs in CI on Linux.
  */
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { makeSyntheticFixture, SCHEDULE } from "./synthetic-fixture.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(here, "..", "src", "server.mjs");
-const fixtureVideo = path.join(here, "..", ".fixture-out", "front", "run.mov");
+const macFixture = path.join(here, "..", ".fixture-out", "front", "run.mov");
+
+let fixtureVideo = process.env.FLIPBOOK_FIXTURE_VIDEO || (fs.existsSync(macFixture) ? macFixture : null);
+const synthetic = !fixtureVideo;
+if (synthetic) {
+  fixtureVideo = await makeSyntheticFixture(path.join(here, "..", ".fixture-out", "synthetic", "run.mp4"));
+}
 
 let failures = 0;
 const check = (ok, label, detail = "") => {
@@ -60,18 +71,30 @@ check(undocumented.length === 0, "every tool parameter is described", undocument
 const doc = await client.callTool({ name: "doctor", arguments: {} });
 const docText = doc.content.find((c) => c.type === "text")?.text ?? "";
 check(!doc.isError, "doctor runs");
-check(/screen recording permission/i.test(docText), "doctor reports permission state");
-check(doc.structuredContent?.ready === true, "doctor says ready", doc.structuredContent?.summary);
+if (process.platform === "darwin" && !process.env.CI) {
+  check(/screen recording permission/i.test(docText), "doctor reports permission state");
+  check(doc.structuredContent?.ready === true, "doctor says ready", doc.structuredContent?.summary);
+} else if (process.platform === "darwin") {
+  // A CI runner has no Screen Recording permission and no Chrome window, so recording
+  // readiness cannot pass there; analysis readiness can, and is what CI exercises.
+  check(doc.structuredContent?.canAnalyze === true, "doctor says analysis is ready (CI)", doc.structuredContent?.summary);
+} else {
+  // Off macOS the honest answer is "analysis only" — not a wall of blocking failures.
+  check(doc.structuredContent?.mode === "analyze-only", "doctor reports analysis-only mode", doc.structuredContent?.summary);
+  check(!doc.structuredContent?.checks.some((c) => c.status === "fail"), "with no blocking failures");
+
+  const rec = await client.callTool({ name: "start_recording", arguments: {} });
+  const recText = rec.content.find((c) => c.type === "text")?.text ?? "";
+  check(rec.isError === true && /analyze_recording/.test(recText), "start_recording refuses, and points at analysis");
+}
 
 // --- list_recordings --------------------------------------------------------
 const list = await client.callTool({ name: "list_recordings", arguments: { limit: 5 } });
 check(!list.isError, "list_recordings runs");
 
 // --- analyze_recording ------------------------------------------------------
-if (!fs.existsSync(fixtureVideo)) {
-  console.log(`\n  SKIP analyze_recording — no fixture at ${fixtureVideo}`);
-  console.log("  run: node test/fixture-run.mjs --front");
-} else {
+console.log(`\nanalysing ${path.relative(process.cwd(), fixtureVideo)}${synthetic ? " (synthetic)" : ""}\n`);
+{
   const res = await client.callTool({
     name: "analyze_recording",
     arguments: {
@@ -100,6 +123,25 @@ if (!fs.existsSync(fixtureVideo)) {
   check(texts.some((t) => /TIMELINE/.test(t.text)), "timeline is present");
 
   const sc = res.structuredContent;
+  check(
+    texts.some((t) => /Each cell is labelled/.test(t.text)),
+    "the contact sheet is labelled (drawtext or libass, and a font, were found)"
+  );
+
+  if (synthetic) {
+    // The claim the whole plugin rests on, now checkable without a browser: the
+    // transient moments a before/after pair misses are among the frames selected.
+    const hit = ([lo, hi]) => sc.keyframes.some((k) => k.t >= lo && k.t < hi);
+    check(hit(SCHEDULE.spinner), "a frame of the loading spinner is selected");
+    check(hit([SCHEDULE.panel[0], SCHEDULE.toast[0]]), "the confirmation panel is selected");
+    check(hit(SCHEDULE.toast), "the toast that vanished before the end is selected");
+    check(
+      !sc.notes.some((n) => /changed the geometry/.test(n)),
+      "a corner toast is not mistaken for a capture fault",
+      sc.notes.join(" | ")
+    );
+  }
+
   check(sc?.estimatedTokens <= sc?.tokenCeiling,
     `estimated tokens within ceiling (${sc?.estimatedTokens}/${sc?.tokenCeiling})`);
 
