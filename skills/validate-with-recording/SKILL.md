@@ -122,9 +122,15 @@ The UX is good.
 ## Reading the result
 
 - **Contact sheet** — the whole recording in one image. Cells are labelled with frame
-  number and timestamp; red outlines mark the largest visual changes.
+  number and timestamp; red outlines mark the largest visual changes. If the caption says
+  the cells are **NOT labelled** (the machine's ffmpeg or fonts could not draw them), count
+  cells left to right: the Nth cell is frame `F<N>` in the timeline, which carries the
+  timestamp. Mention it once so the user can run `doctor` and fix it.
 - **Detail frames** — full-resolution stills of the moments that changed most, or that
-  followed a recorded action. Each says why it was chosen.
+  followed a recorded action. Each says why it was chosen: `peak-change` is the biggest
+  change in a burst, `settled` is what the UI came to rest on, `change-onset` is the first
+  frame of a burst of change — often the loading state that the result then replaced —
+  and `after:<action>` is the moment after something you did.
 - **Timeline** — every sampled moment with a change magnitude `d`, interleaved with the
   actions that caused them and any notes. Long quiet stretches are collapsed. Marks and
   segment boundaries are never dropped from it, however long the recording.
@@ -203,3 +209,11 @@ and it needs to be one someone can check.
 `analyze_recording` takes a `path` to any `.mov`, `.mp4`, `.webm`, `.m4v`, an animated
 `.gif`, or a directory of stills. Use it when the user hands you a screen recording of a
 bug, or a QuickTime capture of something they cannot reproduce on demand.
+
+It is also how this works **off macOS**. Recording needs macOS 15+; `doctor` reports
+"analysis only" on Linux and Windows, and `start_recording` refuses there. Test-runner
+videos are ideal input — Playwright's `recordVideo`, Cypress's `video: true`, Puppeteer's
+screencast — so on those platforms, record the flow with the project's own test tooling
+and pass the video (usually a `.webm`) to `analyze_recording` with your rubric. Such
+videos have no browser chrome around the page; that is expected, not a capture fault.
+A video from elsewhere has no recorded actions or marks, so cite moments by timestamp.

@@ -1,10 +1,16 @@
 # Flipbook
 
+[![CI](https://github.com/ShubhenduVaid/flipbook/actions/workflows/ci.yml/badge.svg)](https://github.com/ShubhenduVaid/flipbook/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@shubhenduvaid/flipbook)](https://www.npmjs.com/package/@shubhenduvaid/flipbook)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Claude can't watch video.** Flipbook records your web app while Claude drives it and
 hands back a flipbook it *can* read: a labelled contact sheet, full-resolution key frames,
 and a timeline correlated with the actions that caused each change.
 
-For Claude Code on macOS 15+. Works alongside Claude in Chrome without interfering with it.
+A Claude Code plugin and a standalone MCP server. Recording needs macOS 15+; analysing a
+recording — yours, or a Playwright or Cypress test video — works on macOS, Linux and
+Windows. Works alongside Claude in Chrome without interfering with it.
 
 ---
 
@@ -49,10 +55,50 @@ and exports them for a human, returning nothing to the model. And the vision API
 a GIF's **first frame**, so an animated GIF isn't something Claude can watch either. (Hand
 one to `analyze_recording` and Flipbook will decode every frame of it.)
 
+## Platform support
+
+| | Record (`start_recording`) | Analyse (`analyze_recording`, `get_frames`) |
+|---|---|---|
+| macOS 15+ | yes — ScreenCaptureKit window capture | yes |
+| macOS 14 and earlier | display capture only (`target: "display"`) | yes |
+| Linux | no | yes |
+| Windows | no | yes |
+
+`doctor` tells you which of the two a machine can do, and why. The analysis half needs
+only Node 22+ and ffmpeg (bundled). CI runs the full protocol suite on all three platforms.
+
 ## Install
 
+Flipbook works in any MCP client. The **Claude Code plugin** is the full experience: it
+adds the `validate-with-recording` skill, the `/flipbook:record` command, and a hook that
+timestamps every Claude-in-Chrome action into the recording. Everywhere else you get the
+same eight tools.
+
+| Client | How |
+|---|---|
+| Claude Code (plugin, recommended) | [below](#claude-code-plugin) |
+| Claude Code (MCP server only) | `claude mcp add flipbook -- npx -y @shubhenduvaid/flipbook` |
+| Claude Desktop | download `flipbook-<version>-darwin-arm64.mcpb` from [Releases](https://github.com/ShubhenduVaid/flipbook/releases) and open it |
+| Cursor | [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=flipbook&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBzaHViaGVuZHV2YWlkL2ZsaXBib29rIl19) |
+| VS Code | [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF)](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522flipbook%2522%252C%2522command%2522%253A%2522npx%2522%252C%2522args%2522%253A%255B%2522-y%2522%252C%2522%2540shubhenduvaid%252Fflipbook%2522%255D%257D) |
+| Anything else | the JSON below |
+
+```json
+{
+  "mcpServers": {
+    "flipbook": { "command": "npx", "args": ["-y", "@shubhenduvaid/flipbook"] }
+  }
+}
+```
+
+It is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.ShubhenduVaid/flipbook`. Whichever you choose, ask for `doctor` first.
+
+### Claude Code plugin
+
 **Before you start:** macOS 15+ (window capture uses ScreenCaptureKit), Node 22+, Xcode
-Command Line Tools (`xcode-select --install`), and Google Chrome.
+Command Line Tools (`xcode-select --install`), and Google Chrome. On Linux or Windows the
+plugin installs and analyses fine; only recording needs the Mac.
 
 **1. Add the marketplace and install.**
 
@@ -218,7 +264,7 @@ and for a subject too small in frame to read.
 
 | Tool | Purpose |
 |---|---|
-| `doctor` | Preflight: macOS, ffmpeg + filters, native helper, permission, target window, disk, footprint |
+| `doctor` | Preflight: what this machine can do (record, analyse), ffmpeg + filters, label font, native helper, permission, target window, disk, footprint |
 | `start_recording` | Capture a window (`label`, `target`, `title_contains`, `window_id`, `fps`, `max_duration_s`) |
 | `mark` | Annotate the timeline mid-run, and split the per-segment change stats |
 | `stop_recording` | Stop, analyse, return the evidence against a `rubric` (`roi`, `clip`) |
@@ -229,6 +275,26 @@ and for a subject too small in frame to read.
 
 `analyze_recording` accepts recordings you made yourself — hand it a QuickTime capture of a
 bug you can't reproduce on demand.
+
+### Test-runner videos, on any platform
+
+Playwright and Cypress already record videos of your end-to-end tests, and Flipbook reads
+them. This is also how to use it on Linux, Windows and CI, where it cannot record itself:
+
+```js
+// playwright.config.js
+export default { use: { video: "on" } };   // or "retain-on-failure"
+```
+
+```
+Analyse test-results/checkout-chromium/video.webm against:
+  A loading spinner is shown while the order is processing.
+  A confirmation panel appears.
+  A success toast appears and then disappears.
+```
+
+Test-runner videos show the page without browser chrome; the capture-fault detectors
+account for that, so a toast in the corner of a dark page is a toast, not a warning.
 
 ### Framing: `roi`
 
@@ -276,18 +342,39 @@ window capture is the only approach that works. It also removes retina scaling a
 arithmetic, and never captures anything but the target window. ffmpeg still does all the
 analysis, and display capture remains available via `target: "display"`.
 
+## What it runs on your machine
+
+Flipbook makes no network calls of its own and never uploads anything; recordings stay in
+`~/.flipbook`. Two things run locally that are worth knowing about, and both happen only
+when `doctor` or a recording needs them:
+
+- **`npm rebuild ffmpeg-static`** in the plugin directory, once. Claude Code installs
+  plugin dependencies with `--ignore-scripts`, which leaves the bundled ffmpeg package
+  without its binary; this restores it (it is ffmpeg-static's own download from its
+  GitHub releases). Skipped whenever a system ffmpeg or `FLIPBOOK_FFMPEG` is found first.
+- **`xcrun swiftc`** compiles `native/sckrec.swift`, the ScreenCaptureKit recorder, into
+  `~/.flipbook/bin` on macOS. It is ~260 lines and you can read it before it runs.
+
 ## Development
 
 ```bash
 npm run validate       # score the repo against docs/VALIDATION-RUBRIC.md
 npm run validate -- --full   # …including the criteria that need macOS + Chrome
-npm test               # 163 unit tests, no browser or permission needed
+npm test               # 169 unit tests, no browser or permission needed
 npm run lint           # Biome (via npx — deliberately not a dependency)
-npm run lint:manifests # plugin/marketplace/package manifests agree
-npm run test:mcp       # 36 MCP protocol checks (macOS)
+npm run lint:manifests # plugin, marketplace, package, registry and .mcpb manifests agree
+npm run test:mcp       # 45 MCP protocol checks, any platform (see below)
 npm run test:e2e       # fixture: spinner + transient toast must be captured (macOS + Chrome)
 npm run test:e2e:occluded  # same, with the browser occluded
+npm run pack:mcpb      # build the Claude Desktop extension into dist/
 ```
+
+`test:mcp` drives the real server over stdio. It analyses the macOS fixture recording if
+one exists, else a synthetic fixture that ffmpeg draws (`test/synthetic-fixture.mjs`) —
+blank tab, spinner, confirmation, and a corner toast that vanishes — and asserts the
+spinner, the panel and the toast are all among the frames selected. That makes the
+product's central claim a CI check. Point `FLIPBOOK_FIXTURE_VIDEO` at any recording to
+run it against that instead.
 
 **[docs/VALIDATION-RUBRIC.md](docs/VALIDATION-RUBRIC.md)** is the standard this project holds
 itself to — 38 numbered criteria covering the promises this README makes, naming, security,
@@ -296,19 +383,22 @@ individually; there is no aggregate score, because a percentage would let a secu
 be averaged away by passing style checks. **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 explains the pipeline and what each module owns.
 
-`npm run validate`, `npm test` and the linters run in CI on every push; the rest need macOS,
-Chrome and Screen Recording permission, so they're local checks.
+`npm run validate`, `npm test`, `npm run test:mcp` and the linters run in CI on every push
+(the protocol suite on Linux, Windows and macOS); `test:e2e` needs macOS, Chrome and
+Screen Recording permission, so it's a local check.
 
 ### Cutting a release
 
-Users get a new version by the two commands under [Updating](#updating), which read the
-marketplace manifest on `main`. So a release is: bump, verify, tag.
+Claude Code users get a new version by the two commands under [Updating](#updating), which
+read the marketplace manifest on `main`. Everyone else gets it from npm, the MCP Registry
+and GitHub Releases, which [the release workflow](.github/workflows/release.yml)
+publishes when the tag is pushed. So a release is: bump, verify, tag.
 
-1. **Bump the version in all four places** — `package.json`, `package-lock.json`
-   (both the root and `packages.""`), `.claude-plugin/plugin.json` and
-   `.claude-plugin/marketplace.json`. Semver: a new tool or parameter is a *minor*, not a
-   patch. `npm run lint:manifests` fails if they disagree, and rubric criteria N1 and N3
-   cover exactly this.
+1. **Bump the version in all six places** — `package.json`, `package-lock.json` (both the
+   root and `packages.""`), `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+   `server.json` (twice: the server and its npm package) and `mcpb/manifest.json`. Semver:
+   a new tool or parameter is a *minor*, not a patch. `npm run lint:manifests` fails if
+   any of them disagree, and rubric criteria N1 and N3 cover exactly this.
 2. **Verify**, including the checks CI can't run:
    ```bash
    npm run validate && npm run test:mcp && npm run test:e2e
@@ -321,8 +411,14 @@ marketplace manifest on `main`. So a release is: bump, verify, tag.
    ```
    `claude plugin tag` creates the `{name}--v{version}` tag this project uses, and refuses
    if `plugin.json` and the marketplace entry disagree or the tree is dirty — which is why
-   step 1 is worth doing properly. Tag messages are the changelog, so write them for
-   someone deciding whether to update.
+   step 1 is worth doing properly. Tag messages are the changelog (and the GitHub release
+   notes), so write them for someone deciding whether to update; add the same entry to
+   [CHANGELOG.md](CHANGELOG.md).
+4. **Watch the release workflow.** It refuses a tag that disagrees with `package.json`,
+   re-runs the tests, then publishes to npm, then to the MCP Registry (which checks the
+   npm package it just published), then attaches the `.mcpb` to a GitHub release.
+   First-time setup for each destination, and the directories that need a one-off
+   submission, are in [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 Biome is invoked through `npx` rather than added as a devDependency: Claude Code installs
 plugin dependencies without `--omit=dev`, so a devDependency would ship into every user's
@@ -336,10 +432,13 @@ what threshold tuning needs.
 |---|---|
 | `FLIPBOOK_HOME` | Data directory (default `~/.flipbook`) |
 | `FLIPBOOK_FFMPEG` | Use a specific ffmpeg binary |
+| `FLIPBOOK_FONT` | Font file for contact-sheet labels (default: the first system font found) |
 | `FLIPBOOK_DEBUG_SELECT` | Trace keyframe selection |
 
 ```
 .claude-plugin/     plugin + marketplace manifests
+server.json         MCP Registry entry
+mcpb/               Claude Desktop extension manifest
 commands/           /flipbook:record
 hooks/              PostToolUse hook correlating Claude-in-Chrome actions
 native/sckrec.swift ScreenCaptureKit window recorder
@@ -350,6 +449,8 @@ src/analyze/        sampling, delta scoring, selection, segments, capture anomal
                     region of interest, sheet, budget, timeline, clips
 src/tools/          MCP tool definitions and shared parameter schemas
 test/unit/          CI-safe unit tests
+test/               protocol suite, synthetic and browser fixtures
+scripts/            validate, manifest lint, doctor CLI, .mcpb packer
 ```
 
 Recordings are written to `~/.flipbook/sessions/` — outside your project, never

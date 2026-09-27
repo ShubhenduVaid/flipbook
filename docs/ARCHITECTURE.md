@@ -62,6 +62,15 @@ Deduplication compares **pixels**, not perceptual hashes. A dHash of a mostly-da
 near-constant: the measured Hamming distance between an idle page and the same page showing
 a spinner was **0**, so hash-based dedupe discarded precisely the frames worth keeping.
 
+A burst of change nominates three frames: its **peak**, the frame it **settled** into,
+and — when the burst is longer than its peak — its **onset**. The onset exists because a
+burst is one contiguous run above the change threshold, so a loading animation that leads
+straight into its result is a single run whose peak is the result arriving. Without the
+onset, the loading state — the transient this tool exists to show — was never nominated.
+A CSS spinner happens to rotate below the threshold, which is why the macOS fixture never
+showed it; a synthetic fixture with a heavier indicator did. The onset is weighted below
+the other two, so it only spends budget they leave over.
+
 When two frames do show the same thing, the **earlier** one wins and inherits the later
 one's reasons. A result panel at 3.75s is pixel-identical to the final frame at 8s; keeping
 the later one throws away the only interesting fact, which is when the state was reached.
@@ -84,8 +93,12 @@ sample pixel (i, j) maps linearly onto fraction (i/128, j/128) of the source fra
 the window's shape, so a bounding box measured in sample space **already is** a fractional
 rect. No aspect correction anywhere.
 
-The region is the bounding box of pixels that changed across the run, ignoring frame pairs
-where most of the frame moved — a navigation repaints everything and has nothing to say
+The region is the bounding box of pixels that changed across the run. A pixel counts if it
+changed in two frame pairs, which keeps compression noise out — or in one pair, if most of
+its neighbours changed too. Without the second rule, every state that is reached once and
+then holds (a confirmation panel appears in exactly one pair) fell outside the box, and
+the crop cut the bottom rows off the result it was meant to frame. Noise is speckle; a
+panel is a block. Frame pairs where most of the frame moved are ignored — a navigation repaints everything and has nothing to say
 about where to crop. Cropping is refused when the box spans most of the frame, because it
 would lose context without gaining resolution.
 
@@ -128,13 +141,34 @@ Two content-based detectors, since nothing here speaks CDP and `S3` forbids it:
   moved, or uniform border appearing where there was none. Gated so a navigation, a modal,
   a dark theme, a one-frame flicker and permanently letterboxed content all stay silent,
   and skipped entirely when there was no painted content to begin with — a featureless
-  frame has no geometry to change.
+  frame has no geometry to change. Three more gates exist for **viewport-only videos**
+  (Playwright, Cypress, a cropped capture), where no browser chrome pins the content box
+  to the frame edges and a dark centred page has a small box that any overlay moves:
+  a box that only *grew* is content appearing, and an override never adds painted area;
+  a box that shrank while everything inside it stayed pixel-identical is content leaving;
+  and a box returning to a geometry the recording already showed is an overlay being
+  dismissed, whereas an override produces geometry never seen before. Before these, a
+  corner toast on the fixture was reported as two capture faults, with advice to ignore
+  every frame after it — the tool told the model to discard its best evidence.
 - **Onset of flatness.** The existing blank check only fires when *every* frame is
   featureless, so it was blind to a recording that starts fine and goes blank halfway. The
   transition is the event, not the state.
 
 A fullscreen video player is genuinely indistinguishable from a viewport override, so the
 note offers that reading rather than asserting a cause.
+
+## Labels on the contact sheet
+
+A grid of unlabelled thumbnails lets the model see *that* something changed but not
+*when*, so every cell has its frame number and timestamp burned in. ffmpeg builds differ
+in how they can draw text: `drawtext` needs freetype **and** harfbuzz since FFmpeg 6.1,
+and the static Linux build ffmpeg-static ships has libass but no `drawtext`. So the sheet
+uses `drawtext` when the build has it, otherwise writes a one-cell ASS subtitle file and
+draws it with the `subtitles` filter, with the chosen font copied alone into a `fontsdir`
+so libass cannot pick another face. The font is `FLIPBOOK_FONT`, else the first of a list
+of macOS, Linux and Windows fonts, else whatever `fc-match` offers. If none of that works
+the cells go unlabelled and the caption says so and how to count them — it never claims
+labels it did not draw. `doctor` reports which path this machine takes.
 
 ## Two backends
 
@@ -165,7 +199,7 @@ leaves an unfinalised file with no `moov` atom.
 | `ffmpeg.mjs` | Resolving ffmpeg, repairing the bundled binary, running it, probing duration and size, listing avfoundation devices |
 | `native.mjs` | Compiling `sckrec` on demand, listing windows, choosing which window a request means |
 | `chrome.mjs` | Asking Chrome which window it considers frontmost, via its own scripting dictionary |
-| `doctor.mjs` | Every preflight check, and the two blank-recording traps |
+| `doctor.mjs` | Every preflight check, the two blank-recording traps, and which job — record, analyse, or neither — this machine can do |
 
 ### `src/capture/` — getting pixels
 
@@ -185,7 +219,7 @@ leaves an unfinalised file with no `moov` atom.
 | `segments.mjs` | Splitting the run at each mark and reporting whether each span moved |
 | `anomaly.mjs` | Detecting a capture that stopped being about the app: geometry changes and the onset of blankness |
 | `roi.mjs` | Where the change is, whether cropping to it helps, and the one crop filter every consumer uses |
-| `sheet.mjs` | The labelled contact sheet |
+| `sheet.mjs` | The labelled contact sheet, and finding a font and a text filter to label it with |
 | `timeline.mjs` | Merging samples, actions, marks and segment boundaries into ordered rows; the priority ladder that decides what survives truncation; resolving a mark to a time |
 | `budget.mjs` | The token arithmetic and the text allocation |
 | `input.mjs` | Accepting a video, an animated GIF, or a directory of stills |
@@ -219,8 +253,10 @@ under `FLIPBOOK_HOME` and never uploaded.
 
 ## Known limits
 
-- macOS 15+ only, and the target window must be the **active tab** of a window that nothing
-  else covers. Both are detected by `doctor` and explained in the README.
+- Recording is macOS 15+ only, and the target window must be the **active tab** of a window
+  that nothing else covers. Both are detected by `doctor` and explained in the README.
+  Analysis runs anywhere Node and ffmpeg do; off macOS `doctor` reports "analysis only" and
+  `start_recording` refuses before creating a session.
 - Analysis is single-pass and in-memory; a recording of several hours would need streaming.
 - The contact sheet can spend several cells on one animation, because a rotating spinner
   genuinely differs frame to frame. Telling an oscillating region from a state change would
@@ -240,13 +276,34 @@ under `FLIPBOOK_HOME` and never uploaded.
 - The geometry detector cannot distinguish a deliberate fullscreen or window resize from a
   device-metrics override.
 
+## Distribution
+
+One codebase ships five ways, and `scripts/lint-manifests.mjs` holds their manifests to
+one name and version:
+
+| Channel | Manifest | Built by |
+|---|---|---|
+| Claude Code plugin (self-hosted marketplace) | `.claude-plugin/plugin.json`, `marketplace.json` | the git tag; the marketplace reads `main` |
+| npm, `@shubhenduvaid/flipbook` (`npx`, Cursor, VS Code, any MCP client) | `package.json` (`bin`, `files`, `mcpName`) | release workflow, trusted publishing |
+| MCP Registry, `io.github.ShubhenduVaid/flipbook` | `server.json` | release workflow, GitHub OIDC |
+| Claude Desktop extension (`.mcpb`) | `mcpb/manifest.json` | `scripts/pack-mcpb.mjs` on macOS, attached to the GitHub release |
+| Directories that index the above | `glama.json` | — |
+
+The npm name is scoped because the bare `flipbook` belongs to someone else there; the
+server strips the scope from its own identity, so every client still sees `flipbook`.
+The `.mcpb` carries its own `node_modules`, including an ffmpeg binary for the platform it
+was built on, so the packer stamps exactly that platform into the bundle's compatibility.
+
 ## Tests
 
 `test/unit/` runs on pure functions over synthetic pixel buffers — no ffmpeg, no browser, no
-screen permission — so it runs in CI. Everything needing a real recording lives in
-`test/mcp-check.mjs` (protocol round-trip), `test/fixture-run.mjs` (the spinner-and-toast
-fixture, frontmost and occluded) and `test/live-run.mjs` (non-interference), and is run
-locally. `scripts/validate.mjs` scores the whole repo against
+screen permission — so it runs in CI. `test/mcp-check.mjs` drives the real server over stdio against a synthetic
+fixture that ffmpeg draws from boxes (`test/synthetic-fixture.mjs`: blank tab, spinner,
+confirmation panel, corner toast), so it needs no browser, no font and no permission, and
+runs in CI on Linux, Windows and macOS. It asserts the spinner, panel and toast are all
+selected, and that the toast is not mistaken for a capture fault. Everything needing a
+real screen lives in `test/fixture-run.mjs` (the HTML fixture, frontmost and occluded) and
+`test/live-run.mjs` (non-interference), and is run locally. `scripts/validate.mjs` scores the whole repo against
 [the validation rubric](VALIDATION-RUBRIC.md).
 
 Linting is Biome, invoked through `npx` and deliberately **not** a dependency: Claude Code
