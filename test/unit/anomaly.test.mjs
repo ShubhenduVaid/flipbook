@@ -5,7 +5,7 @@ import {
   contentBox, findGeometryJumps, findFlatOnset, geometryNote, flatOnsetNote, ANOMALY_DEFAULTS,
 } from "../../src/analyze/anomaly.mjs";
 import { SAMPLE_W, SAMPLE_H } from "../../src/analyze/frames.mjs";
-import { blankFrame, texturedFrame } from "./helpers.mjs";
+import { blankFrame, texturedFrame, withRect } from "./helpers.mjs";
 
 const VERDICT = /\b(PASS|FAIL|PASSED|FAILED)\b|✅|❌/;
 
@@ -164,4 +164,41 @@ test("the onset rule needs a real transition, not just a high border fraction", 
     ANOMALY_DEFAULTS.flatVariance <= ANOMALY_DEFAULTS.liveVariance,
     "the flat and live bands must not overlap"
   );
+});
+
+// Caught by analysing a Playwright recording of the bundled fixture on Linux. A
+// viewport-only video has no browser chrome to pin the content box to the frame edges,
+// so on a dark, centred layout a toast in the corner stretched the box across a third
+// of the frame — and its dismissal shrank it back. Both were reported as device-metrics
+// overrides, with advice to disregard every frame after the toast appeared: the tool
+// told the model to throw away the very evidence it was built to capture.
+test("a toast that appears in the corner of a centred layout and is dismissed is not a geometry change", () => {
+  const card = contentIn({ x: 44, y: 52, w: 40, h: 16 }, { seed: 3 });
+  const confirmed = contentIn({ x: 44, y: 44, w: 40, h: 36 }, { seed: 3 });
+  const withToast = withRect(confirmed, { x: 108, y: 6, w: 16, h: 6, value: 200 });
+  const frames = [...repeat(card, 4), ...repeat(withToast, 6), ...repeat(confirmed, 6)];
+
+  assert.deepEqual(findGeometryJumps(scoredFrom(frames)), [], "content appeared, then left");
+});
+
+test("a modal backdrop that covers a centred layout and then closes is not a geometry change", () => {
+  const page = contentIn({ x: 40, y: 40, w: 48, h: 48 }, { seed: 4 });
+  const modal = withRect(contentIn({ x: 0, y: 0, w: 128, h: 128 }, { seed: 5 }), {
+    x: 44, y: 44, w: 40, h: 40, value: 230,
+  });
+  const frames = [...repeat(page, 4), ...repeat(modal, 5), ...repeat(page, 5)];
+
+  assert.deepEqual(findGeometryJumps(scoredFrom(frames)), []);
+});
+
+test("a centred layout re-laid out into a smaller viewport is still detected", () => {
+  // What an override actually does to a centred page: the content recentres inside a
+  // smaller viewport anchored top-left, so the pixels inside the new box are different.
+  const page = contentIn({ x: 40, y: 40, w: 48, h: 48 }, { seed: 4 });
+  const shrunk = contentIn({ x: 12, y: 12, w: 24, h: 24 }, { seed: 9 });
+  const frames = [...repeat(page, 4), ...repeat(shrunk, 6)];
+  const jumps = findGeometryJumps(scoredFrom(frames));
+
+  assert.equal(jumps.length, 1);
+  assert.equal(jumps[0].t, 1.0);
 });

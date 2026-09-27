@@ -27,6 +27,7 @@ export const ANOMALY_DEFAULTS = {
   stableBefore: 2, // samples of settled geometry required beforehand
   persistAfter: 3, // samples the new geometry must hold
   persistTolerance: 0.03,
+  unchangedInside: 0.02, // mean grey difference (0..1) below which a shrunken box's contents are "the same"
   flatVariance: 0.02, // matches the whole-recording blank check in select.mjs
   liveVariance: 0.04, // clearly not flat
   flatRunIn: 3,
@@ -117,6 +118,33 @@ function edgeShift(a, b) {
   );
 }
 
+/** True when box `outer` contains box `inner`, give or take `tolerance` on each edge. */
+function contains(outer, inner, tolerance) {
+  return (
+    outer.x0 <= inner.x0 + tolerance &&
+    outer.y0 <= inner.y0 + tolerance &&
+    outer.x1 >= inner.x1 - tolerance &&
+    outer.y1 >= inner.y1 - tolerance
+  );
+}
+
+/** Mean absolute grey difference, 0..1, between two frames inside a fractional box. */
+function diffInside(a, b, box) {
+  const x0 = Math.floor(box.x0 * SAMPLE_W);
+  const x1 = Math.ceil(box.x1 * SAMPLE_W);
+  const y0 = Math.floor(box.y0 * SAMPLE_H);
+  const y1 = Math.ceil(box.y1 * SAMPLE_H);
+  let sum = 0;
+  let n = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      sum += Math.abs(a[y * SAMPLE_W + x] - b[y * SAMPLE_W + x]);
+      n++;
+    }
+  }
+  return n ? sum / n / 255 : 0;
+}
+
 /**
  * An abrupt, persistent change in the geometry the window is actually painting.
  *
@@ -160,6 +188,17 @@ export function findGeometryJumps(scored, opts = ANOMALY_DEFAULTS) {
     const previous = jumps[jumps.length - 1];
     if (previous && edgeShift(boxes[previous.index - 1], after) < opts.persistTolerance) {
       previous.restoredAtT = Number(scored[i].t.toFixed(2));
+      continue;
+    }
+
+    if (contains(after, before, opts.persistTolerance)) continue;
+    if (boxes.slice(0, i - 1).some((b) => !b.empty && edgeShift(b, after) < opts.persistTolerance)) {
+      continue;
+    }
+    if (
+      contains(before, after, opts.persistTolerance) &&
+      diffInside(scored[i - 1].pixels, scored[i].pixels, after) < opts.unchangedInside
+    ) {
       continue;
     }
 
