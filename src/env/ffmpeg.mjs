@@ -93,12 +93,13 @@ export function resolveFfmpeg() {
 }
 
 /** Run ffmpeg. Non-zero exit rejects with stderr attached, which is where ffmpeg talks. */
-export async function ffmpeg(args, { timeout = 120_000 } = {}) {
+export async function ffmpeg(args, { timeout = 120_000, cwd } = {}) {
   const bin = resolveFfmpeg();
   try {
     const { stdout, stderr } = await execFileAsync(bin, ["-hide_banner", ...args], {
       timeout,
       maxBuffer: 64 * 1024 * 1024,
+      cwd,
     });
     return { stdout, stderr };
   } catch (err) {
@@ -146,6 +147,26 @@ export async function probeSize(file) {
   return { width: Number(m[1]), height: Number(m[2]) };
 }
 
+let filterList = null;
+
+/**
+ * Whether this ffmpeg build has a filter. Builds differ in ways that matter here: the
+ * static Linux build ffmpeg-static ships has freetype but no drawtext, because since
+ * FFmpeg 6.1 drawtext also needs harfbuzz. Cached, since the answer cannot change
+ * without a different binary.
+ */
+export async function hasFilter(name) {
+  if (!filterList) {
+    const bin = resolveFfmpeg();
+    const { stdout } = await execFileAsync(bin, ["-hide_banner", "-filters"], {
+      timeout: 20_000,
+      maxBuffer: 8 * 1024 * 1024,
+    }).catch((e) => ({ stdout: e.stdout || "" }));
+    filterList = stdout;
+  }
+  return new RegExp(`^\\s*\\S+\\s+${name}\\s`, "m").test(filterList);
+}
+
 /** Which optional pieces this ffmpeg build actually has. Used by doctor. */
 export async function capabilities() {
   const bin = resolveFfmpeg();
@@ -159,8 +180,8 @@ export async function capabilities() {
     timeout: 20_000,
     maxBuffer: 8 * 1024 * 1024,
   }).catch((e) => ({ stdout: e.stdout || "" }));
-  for (const f of ["scale", "crop", "tile", "drawtext", "drawbox", "select", "signalstats"]) {
-    out[f] = new RegExp(`\\b${f}\\b`).test(filters);
+  for (const f of ["scale", "crop", "tile", "drawtext", "subtitles", "drawbox", "select", "signalstats"]) {
+    out[f] = new RegExp(`^\\s*\\S+\\s+${f}\\s`, "m").test(filters);
   }
   return out;
 }

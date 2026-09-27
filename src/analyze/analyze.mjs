@@ -194,8 +194,12 @@ export async function analyzeVideo({
 
   const sheetCaption = sheet
     ? `${cropTag}CONTACT SHEET — ${sheet.count} keyframes, ${sheet.cols}x${sheet.rows}, read ` +
-      `left to right then top to bottom. Each cell is labelled with its frame number and ` +
-      `timestamp; red-outlined cells are the largest visual changes` +
+      `left to right then top to bottom. ` +
+      (sheet.labelled
+        ? `Each cell is labelled with its frame number and timestamp; `
+        : `Cells are NOT labelled (${sheet.labelProblem}; run doctor), so count them: the ` +
+          `Nth cell is frame F<N> in the timeline below; `) +
+      `red-outlined cells are the largest visual changes` +
       (roiState.applied
         ? `, and the amber border marks every cell as a crop, not the whole window.`
         : `.`)
