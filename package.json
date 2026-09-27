@@ -1,18 +1,50 @@
 {
-  "name": "flipbook",
-  "version": "1.2.0",
-  "private": true,
+  "name": "@shubhenduvaid/flipbook",
+  "version": "1.3.0",
   "type": "module",
   "description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook of keyframes it can actually read.",
+  "mcpName": "io.github.ShubhenduVaid/flipbook",
   "main": "src/server.mjs",
+  "bin": {
+    "flipbook-mcp": "src/server.mjs"
+  },
+  "files": [
+    "src/",
+    "native/",
+    "scripts/build-native.mjs",
+    "scripts/doctor-cli.mjs",
+    "README.md",
+    "LICENSE"
+  ],
   "license": "MIT",
   "author": "Shubhendu Vaid",
+  "homepage": "https://github.com/ShubhenduVaid/flipbook#readme",
+  "bugs": {
+    "url": "https://github.com/ShubhenduVaid/flipbook/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ShubhenduVaid/flipbook.git"
+    "url": "git+https://github.com/ShubhenduVaid/flipbook.git"
   },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "browser-testing",
+    "qa",
+    "screen-recording",
+    "screencapturekit",
+    "keyframes",
+    "visual-validation",
+    "playwright"
+  ],
   "engines": {
     "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build:native": "node scripts/build-native.mjs",
@@ -24,7 +56,8 @@
     "test": "node --test \"test/unit/*.test.mjs\"",
     "test:mcp": "node test/mcp-check.mjs",
     "test:e2e": "node test/fixture-run.mjs --front --seconds 10",
-    "test:e2e:occluded": "node test/fixture-run.mjs --seconds 10"
+    "test:e2e:occluded": "node test/fixture-run.mjs --seconds 10",
+    "pack:mcpb": "node scripts/pack-mcpb.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
