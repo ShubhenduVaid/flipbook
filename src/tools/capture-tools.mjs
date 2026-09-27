@@ -37,6 +37,21 @@ export function registerCaptureTools(server) {
       },
     },
     async (args) => {
+      if (process.platform !== "darwin") {
+        // Refused before a session exists, so a machine that can never record does not
+        // accumulate failed sessions — and is not told to install Xcode.
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text:
+              `Recording needs macOS 15+ (ScreenCaptureKit); this is ${process.platform}. ` +
+              `Analysis works here, though: record the flow with any tool — Playwright's ` +
+              `recordVideo, Cypress, OBS, ffmpeg — and pass the file to analyze_recording ` +
+              `with your rubric.`,
+          }],
+        };
+      }
       const running = activeRecordings();
       if (running.length) {
         return {

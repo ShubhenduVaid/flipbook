@@ -8,7 +8,7 @@ import { resolveInput, VIDEO_EXTS, IMAGE_EXTS } from "../../src/analyze/input.mj
 
 /**
  * Error paths only. The success paths shell out to ffmpeg, so they live in the
- * integration checks (`npm run test:mcp`) and stay out of CI.
+ * integration checks (`npm run test:mcp`) instead.
  */
 
 function tmpdir() {
@@ -27,9 +27,11 @@ test("common recording formats are accepted", () => {
 });
 
 test("a missing path fails with the path in the message", async () => {
+  // The resolved path, not a POSIX literal: on Windows it reads D:\definitely\not\here.mov.
+  const missing = "/definitely/not/here.mov";
   await assert.rejects(
-    () => resolveInput("/definitely/not/here.mov"),
-    /not found.*not\/here\.mov/s
+    () => resolveInput(missing),
+    (err) => /not found/.test(err.message) && err.message.includes(path.resolve(missing))
   );
 });
 

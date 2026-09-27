@@ -112,7 +112,9 @@ if (plugin && marketplace?.plugins?.length) {
 // ---- package.json ----------------------------------------------------------
 const pkg = readJson("package.json");
 if (pkg && plugin) {
-  if (pkg.name !== plugin.name) {
+  // npm's unscoped "flipbook" belongs to someone else, so the package is published under
+  // a scope. Only the bare name has to match the plugin.
+  if (pkg.name.replace(/^@[^/]+\//, "") !== plugin.name) {
     fail(`package.json name "${pkg.name}" does not match plugin name "${plugin.name}"`);
   }
   if (pkg.version !== plugin.version) {
@@ -121,6 +123,54 @@ if (pkg && plugin) {
   if (pkg.license !== plugin.license) {
     fail(`package.json license "${pkg.license}" does not match plugin "${plugin.license}"`);
   }
+}
+
+// ---- server.json (MCP Registry) -------------------------------------------
+// The registry proves ownership by reading mcpName from the *published* npm package, so
+// a mismatch here is a failed release discovered after the npm publish already happened.
+const registry = readJson("server.json");
+if (registry && pkg) {
+  if (registry.name !== pkg.mcpName) {
+    fail(`server.json name "${registry.name}" does not match package.json mcpName "${pkg.mcpName}"`);
+  }
+  if ((registry.description ?? "").length > 100) {
+    fail(`server.json: description is ${registry.description.length} characters; the registry allows 100`);
+  }
+  if (registry.version !== pkg.version) {
+    fail(`server.json version "${registry.version}" does not match package.json "${pkg.version}"`);
+  }
+  const npmPkg = (registry.packages ?? []).find((p) => p.registryType === "npm");
+  if (!npmPkg) fail("server.json: no npm package entry");
+  else {
+    if (npmPkg.identifier !== pkg.name) {
+      fail(`server.json package "${npmPkg.identifier}" is not the npm package "${pkg.name}"`);
+    }
+    if (npmPkg.version !== pkg.version) {
+      fail(`server.json package version "${npmPkg.version}" does not match "${pkg.version}"`);
+    }
+  }
+}
+
+// ---- mcpb/manifest.json (Claude Desktop extension) --------------------------
+const mcpb = readJson("mcpb/manifest.json");
+if (mcpb && plugin) {
+  if (mcpb.name !== plugin.name) fail(`mcpb manifest name "${mcpb.name}" does not match "${plugin.name}"`);
+  if (mcpb.version !== plugin.version) {
+    fail(`mcpb manifest version "${mcpb.version}" does not match "${plugin.version}"`);
+  }
+  requireFile(mcpb.server?.entry_point ?? "(no entry_point)", "mcpb/manifest.json");
+
+  // The listing shows these tools, so they have to be the ones the server registers.
+  const registered = new Set();
+  for (const f of ["src/server.mjs", "src/tools/capture-tools.mjs", "src/tools/analysis-tools.mjs"]) {
+    const src = fs.readFileSync(path.join(root, f), "utf8");
+    for (const m of src.matchAll(/registerTool\(\s*"([a-z_]+)"/g)) registered.add(m[1]);
+  }
+  const listed = new Set((mcpb.tools ?? []).map((t) => t.name));
+  const missing = [...registered].filter((t) => !listed.has(t));
+  const extra = [...listed].filter((t) => !registered.has(t));
+  if (missing.length) fail(`mcpb manifest does not list: ${missing.join(", ")}`);
+  if (extra.length) fail(`mcpb manifest lists tools the server lacks: ${extra.join(", ")}`);
 }
 
 // ---- component files referenced by the manifests --------------------------

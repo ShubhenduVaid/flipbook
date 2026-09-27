@@ -1,16 +1,36 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 import { resolveFfmpeg, capabilities, listAvfDevices, repairBundledFfmpeg } from "./ffmpeg.mjs";
 import { hasSwift, buildNative, listWindows, BINARY } from "./native.mjs";
 import { DATA_HOME } from "./paths.mjs";
 import { totalFootprint } from "../capture/session.mjs";
+import { resolveFont } from "../analyze/sheet.mjs";
 
 const execFileAsync = promisify(execFile);
 
 const ok = (name, detail) => ({ name, status: "ok", detail });
 const warn = (name, detail, fix) => ({ name, status: "warn", detail, fix });
 const bad = (name, detail, fix) => ({ name, status: "fail", detail, fix });
+
+/**
+ * Recording needs macOS; analysis needs only ffmpeg. Off macOS, doctor used to report
+ * four blocking failures on a machine where analyze_recording and get_frames work
+ * perfectly — so it now says which of the two jobs this machine can do.
+ */
+export const IS_MAC = process.platform === "darwin";
+
+function checkPlatform() {
+  return warn(
+    "platform",
+    `${os.platform()} — recording needs macOS 15+ (ScreenCaptureKit), so start_recording ` +
+      "is unavailable here. analyze_recording and get_frames work on any recording.",
+    "Record with any tool you like — Playwright's recordVideo, Cypress, OBS, ffmpeg — and " +
+      "pass the file to analyze_recording."
+  );
+}
 
 async function checkMacOS() {
   try {
@@ -52,16 +72,34 @@ async function checkFfmpeg() {
     }
   }
   const results = [ok("ffmpeg", `${bin}${repaired ? " (bundled binary just restored)" : ""}`)];
+  const installHint = IS_MAC ? "brew install ffmpeg" : "install a full ffmpeg build, or set FLIPBOOK_FFMPEG";
   try {
     const caps = await capabilities();
-    const missing = ["scale", "crop", "tile", "drawtext", "drawbox", "select"].filter(
-      (f) => !caps[f]
-    );
+    const missing = ["scale", "crop", "tile", "drawbox", "select"].filter((f) => !caps[f]);
     results.push(
       missing.length
-        ? bad("ffmpeg filters", `missing: ${missing.join(", ")}`, "brew install ffmpeg")
-        : ok("ffmpeg filters", "scale, crop, tile, drawtext, drawbox, select")
+        ? bad("ffmpeg filters", `missing: ${missing.join(", ")}`, installHint)
+        : ok("ffmpeg filters", "scale, crop, tile, drawbox, select")
     );
+    // Labels are what make a contact sheet citable. Either filter will do: the static
+    // Linux build ffmpeg-static ships has libass but not drawtext.
+    const font = resolveFont();
+    const via = caps.drawtext ? "drawtext" : caps.subtitles ? "libass" : null;
+    if (!via) {
+      results.push(warn(
+        "contact sheet labels",
+        "this ffmpeg has neither drawtext nor subtitles, so cells will be unlabelled",
+        installHint
+      ));
+    } else if (!font) {
+      results.push(warn(
+        "contact sheet labels",
+        "no font found, so cells will be unlabelled",
+        "Set FLIPBOOK_FONT to any .ttf file, or install a font package such as DejaVu or Liberation."
+      ));
+    } else {
+      results.push(ok("contact sheet labels", `${via}, ${font}`));
+    }
   } catch (err) {
     results.push(warn("ffmpeg filters", err.message));
   }
@@ -178,12 +216,23 @@ async function checkChrome() {
   return results;
 }
 
+/** The data directory may not exist yet on a first run, so measure where it will be. */
+function nearestExisting(dir) {
+  let d = path.resolve(dir);
+  while (!fs.existsSync(d)) {
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return d;
+}
+
 async function checkDisk() {
   try {
-    const { stdout } = await execFileAsync("df", ["-k", DATA_HOME], { timeout: 10_000 });
-    const line = stdout.trim().split("\n").pop();
-    const availKb = Number(line.split(/\s+/)[3]);
-    const gb = availKb / 1024 / 1024;
+    // statfs rather than parsing `df`: it works on every platform Node does, and df's
+    // columns wrap on Linux when the device name is long.
+    const st = fs.statfsSync(nearestExisting(DATA_HOME));
+    const gb = (Number(st.bavail) * Number(st.bsize)) / 1024 ** 3;
     // ~30 MB/min at these settings; 2 GB is a comfortable floor.
     if (gb < 2) return [warn("disk space", `${gb.toFixed(1)} GB free in ${DATA_HOME}`)];
     return [ok("disk space", `${gb.toFixed(1)} GB free`)];
@@ -232,25 +281,46 @@ async function checkAvfFallback() {
 }
 
 export async function runDoctor() {
+  const ffmpegChecks = await checkFfmpeg();
+  const captureChecks = IS_MAC
+    ? [
+        await checkMacOS(),
+        ...(await checkNative()),
+        ...(await checkPermission()),
+        ...(await checkChrome()),
+        ...(await checkAvfFallback()),
+      ]
+    : [checkPlatform()];
   const checks = [
-    await checkMacOS(),
-    ...(await checkFfmpeg()),
-    ...(await checkNative()),
-    ...(await checkPermission()),
-    ...(await checkChrome()),
-    ...(await checkAvfFallback()),
+    ...(IS_MAC ? [captureChecks[0]] : captureChecks),
+    ...ffmpegChecks,
+    ...(IS_MAC ? captureChecks.slice(1) : []),
     ...(await checkDisk()),
     ...checkFootprint(),
   ];
   const failures = checks.filter((c) => c.status === "fail");
   const warnings = checks.filter((c) => c.status === "warn");
+  const canAnalyze = !ffmpegChecks.some((c) => c.status === "fail");
+  const canRecord = IS_MAC && failures.length === 0;
+  const warned = warnings.length ? ` (${warnings.length} warning(s))` : "";
+
+  let summary;
+  if (canRecord) summary = `Ready to record${warned}.`;
+  else if (!IS_MAC && canAnalyze) {
+    summary = `Analysis only on ${os.platform()}: analyze_recording and get_frames are ready${warned}. Recording needs macOS 15+.`;
+  } else {
+    summary = `${failures.length} blocking problem(s) must be fixed before ${canAnalyze ? "recording" : "recording or analysing"}.`;
+  }
+
   return {
-    ready: failures.length === 0,
+    // `ready` keeps its original meaning — ready to record — so existing callers that
+    // gate start_recording on it stay correct.
+    ready: canRecord,
+    canRecord,
+    canAnalyze,
+    mode: canRecord ? "record" : canAnalyze ? "analyze-only" : "unavailable",
     checks,
-    summary:
-      failures.length === 0
-        ? `Ready to record${warnings.length ? ` (${warnings.length} warning(s))` : ""}.`
-        : `${failures.length} blocking problem(s) must be fixed before recording.`,
+    summary,
     host: `${os.platform()} ${os.release()} · node ${process.version} · data: ${DATA_HOME}`,
   };
 }

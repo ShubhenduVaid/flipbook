@@ -268,3 +268,28 @@ test("the hint quotes the resolution gain, and it is real", () => {
     "the quoted multiplier matches the rect it recommends"
   );
 });
+
+// Caught on a real recording: the confirmation panel appears in exactly one frame pair,
+// so requiring two hits per pixel left its lower rows outside the auto crop.
+test("changeBox includes a region that changes once and then holds", () => {
+  const base = blankFrame(30);
+  const spinnerOn = withRect(base, { x: 60, y: 40, w: 8, h: 8, value: 240 });
+  const panel = withRect(base, { x: 40, y: 40, w: 48, h: 40, value: 120 });
+  const frames = [...alternating(base, spinnerOn, 6), ...Array.from({ length: 4 }, () => panel)];
+  const box = changeBox(scoredFrom(frames), ROI_DEFAULTS);
+
+  assert.equal(box.found, true);
+  assert.ok(box.y + box.h >= 80 / SAMPLE_H - 0.01, `bottom ${box.y + box.h} must reach the panel's`);
+  assert.ok(box.x <= 40 / SAMPLE_W + 0.01, `left ${box.x} must reach the panel's`);
+});
+
+test("scattered speckle that appears once stays out of the box", () => {
+  const base = blankFrame(30);
+  const speckled = Uint8Array.from(base);
+  for (let i = 0; i < 40; i++) speckled[(i * 997) % speckled.length] = 200; // isolated pixels
+  const lit = withRect(speckled, { x: 60, y: 60, w: 6, h: 6, value: 240 });
+  const frames = [base, ...alternating(speckled, lit, 8)];
+  const box = changeBox(scoredFrom(frames), ROI_DEFAULTS);
+
+  assert.ok(box.w < 0.1 && box.h < 0.1, `box ${JSON.stringify(box)} was widened by speckle`);
+});

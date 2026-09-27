@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ShubhenduVaid/flipbook",
+  "title": "Flipbook",
+  "description": "Record a browser window while an agent drives it; get back keyframes and a timeline it can read.",
+  "repository": {
+    "url": "https://github.com/ShubhenduVaid/flipbook",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/ShubhenduVaid/flipbook#readme",
+  "version": "1.3.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@shubhenduvaid/flipbook",
+      "version": "1.3.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FLIPBOOK_HOME",
+          "description": "Where recordings are stored (default ~/.flipbook).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "FLIPBOOK_FFMPEG",
+          "description": "Path to a specific ffmpeg binary (default: system ffmpeg, then the bundled one).",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

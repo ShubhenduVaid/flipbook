@@ -20,8 +20,10 @@ const PKG = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "package.json"), "
 
 ensureDirs();
 
+// Published to npm under a scope (the bare name was taken there); the server's own
+// identity is the plugin name, which is what every client and the registry show.
 const server = new McpServer(
-  { name: PKG.name, version: PKG.version },
+  { name: PKG.name.replace(/^@[^/]+\//, ""), version: PKG.version },
   {
     instructions:
       "Records a browser window while Claude drives it, then returns visual evidence " +

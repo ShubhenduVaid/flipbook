@@ -48,7 +48,7 @@ identity should be stated in two places that can disagree.
 |---|---|---|
 | N1 | **One source of truth** for name and version — no hardcoded semver outside the manifests | Grep `src/`, `test/`, `scripts/` for version literals |
 | N2 | No stale identifiers anywhere (`video-qa`, `video-mcp`, `VIDEO_QA`, `browser-replay`) | Grep the tracked tree |
-| N3 | The three manifests agree on name, version and license | `scripts/lint-manifests.mjs` |
+| N3 | Every manifest agrees on name, version and license — plugin, marketplace, package, MCP Registry `server.json`, and the `.mcpb` manifest, whose tool list must match the server's | `scripts/lint-manifests.mjs` |
 | N4 | Every skill directory matches its frontmatter `name` | Parse `skills/*/SKILL.md` |
 | N5 | Skill and command names are consistent with the package | Names contain no concept the plugin name already implies |
 | N6 | `allowed-tools` in `commands/record.md` matches the real namespaced tool names | `mcp__plugin_<plugin>_<server>__<tool>` derived from the manifests |
@@ -74,7 +74,7 @@ The tool records screens and spawns processes. Both deserve scrutiny.
 | Q1 | Lint and format clean | `npm run lint` |
 | Q2 | **No dead exports** — nothing is exported that no other module imports | Static scan of `export` vs imports |
 | Q3 | Unit suite passes | `npm test` |
-| Q4 | MCP protocol suite passes | `npm run test:mcp` (MANUAL) |
+| Q4 | MCP protocol suite passes, including that a synthetic recording's spinner and vanished toast are selected | `npm run test:mcp` (MANUAL only without ffmpeg) |
 | Q5 | Every MCP tool has a substantive description and an input schema | `tools/list` over a live server |
 | Q6 | Error paths return actionable messages, not stack traces | Missing file, bad type, no source |
 | Q7 | Every tool parameter **describes itself** | The tool list is the only documentation available at call time |

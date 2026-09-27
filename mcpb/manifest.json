@@ -1,0 +1,48 @@
+{
+  "manifest_version": "0.3",
+  "name": "flipbook",
+  "display_name": "Flipbook",
+  "version": "1.3.0",
+  "description": "Record a browser window while Claude drives it, and get back keyframes and a timeline Claude can actually read.",
+  "long_description": "Claude can't watch video. Flipbook records your web app while Claude drives it and hands back a flipbook it can read: a labelled contact sheet, full-resolution key frames, and a timeline of what changed and when. It catches what screenshots miss — spinners, layout shift, flicker, double-submits, and toasts that appear and vanish. Recording needs macOS 15+ and Screen Recording permission; analysing an existing recording (.mov, .mp4, .webm, .gif, or a folder of stills — including Playwright and Cypress videos) works on macOS, Linux and Windows. Everything stays on your machine.",
+  "author": {
+    "name": "Shubhendu Vaid",
+    "url": "https://github.com/ShubhenduVaid"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShubhenduVaid/flipbook"
+  },
+  "homepage": "https://github.com/ShubhenduVaid/flipbook#readme",
+  "documentation": "https://github.com/ShubhenduVaid/flipbook#readme",
+  "support": "https://github.com/ShubhenduVaid/flipbook/issues",
+  "license": "MIT",
+  "keywords": ["browser", "testing", "qa", "screen-recording", "keyframes", "visual-validation"],
+  "server": {
+    "type": "node",
+    "entry_point": "src/server.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/src/server.mjs"],
+      "env": {
+        "FLIPBOOK_PLUGIN_ROOT": "${__dirname}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "doctor", "description": "Check what this machine can do: record, analyse, or neither — and why." },
+    { "name": "start_recording", "description": "Start recording a browser window (macOS 15+)." },
+    { "name": "mark", "description": "Annotate the recording timeline mid-run." },
+    { "name": "stop_recording", "description": "Stop, and return a contact sheet, key frames and a timeline to judge against a rubric." },
+    { "name": "analyze_recording", "description": "The same evidence for any video, animated GIF or folder of stills." },
+    { "name": "get_frames", "description": "Full-resolution frames at exact times, over a range, or after a mark." },
+    { "name": "list_recordings", "description": "Browse past recordings and their disk footprint." },
+    { "name": "prune_recordings", "description": "Reclaim disk from old recordings — a dry run unless confirmed." }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  }
+}

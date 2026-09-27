@@ -1,0 +1,148 @@
+name: Release
+
+# Runs when a release tag is pushed — the `flipbook--v<version>` tag that
+# `claude plugin tag` creates. Claude Code users are already served by the tag itself
+# (the marketplace reads main); this publishes everywhere else:
+#
+#   npm                 @shubhenduvaid/flipbook, via trusted publishing (no token)
+#   MCP Registry        io.github.ShubhenduVaid/flipbook, via GitHub OIDC (no token)
+#   GitHub Release      with the Claude Desktop extension (.mcpb) attached
+#
+# One-time setup is in docs/PUBLISHING.md: the first npm publish is manual, and the
+# trusted publisher has to be configured on npmjs.com before this workflow can publish.
+
+on:
+  push:
+    tags: ["flipbook--v*"]
+
+permissions: {}
+
+jobs:
+  verify:
+    name: verify the tag matches the manifests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Tag version must equal package.json version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#flipbook--v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag says $tag but package.json says $pkg"
+            exit 1
+          fi
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+      - run: npm run lint:manifests
+      - run: npm test
+      - run: npm run test:mcp
+
+  npm:
+    name: publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      # Trusted publishing needs npm >= 11.5.1, which Node 22 does not ship.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          version="${{ needs.verify.outputs.version }}"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on npm — skipping"
+          else
+            npm publish --access public
+          fi
+
+  mcp-registry:
+    name: publish to the MCP Registry
+    needs: npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # io.github.ShubhenduVaid/* namespace, proven by OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${os}_${arch}.tar.gz" \
+            | tar xz mcp-publisher
+
+      # The registry verifies ownership by reading mcpName from the package it fetches
+      # from npm, so this can only succeed once the npm publish above is live.
+      - name: Publish
+        run: |
+          ./mcp-publisher validate
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+  mcpb:
+    name: build the Claude Desktop extension
+    needs: verify
+    # The bundle carries the ffmpeg binary for the platform it was built on, and
+    # recording is macOS-only, so it is built on macOS (Apple silicon). Intel Macs
+    # with a Homebrew ffmpeg work too — a system ffmpeg is preferred over the bundled one.
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm run pack:mcpb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcpb
+          path: dist/*.mcpb
+          if-no-files-found: error
+
+  github-release:
+    name: create the GitHub release
+    needs: [verify, npm, mcpb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcpb
+          path: dist
+
+      # The annotated tag message is the changelog entry; the release repeats it.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.mcpb \
+            --verify-tag --notes-from-tag --title "Flipbook ${{ needs.verify.outputs.version }}"

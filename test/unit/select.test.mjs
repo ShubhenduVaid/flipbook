@@ -120,3 +120,23 @@ test("selectKeyframes handles an empty recording without throwing", () => {
   assert.equal(frames.length, 0);
   assert.ok(notes.length > 0);
 });
+
+// Caught by a synthetic fixture: a spinner animating hard enough to stay above the
+// transition threshold, followed immediately by the result, formed one run whose peak
+// was the result — so no frame of the spinner was ever selected.
+test("a loading animation that runs straight into its result still gets a frame", () => {
+  const base = blankFrame(20);
+  const spinA = withRect(base, { x: 60, y: 60, w: 4, h: 4, value: 200 });
+  const spinB = withRect(base, { x: 64, y: 64, w: 4, h: 4, value: 200 });
+  const result = withRect(base, { x: 30, y: 30, w: 60, h: 40, value: 120 });
+  const frames = [base, base, base, spinA, spinB, spinA, spinB, spinA, result, result, result, result];
+  const deltas = [0, 0, 0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.4, 0, 0, 0];
+  const { frames: picked } = selectKeyframes(scoredFromDeltas(deltas, { frames }), { maxFrames: 6 });
+
+  const spinnerShown = picked.some((f) => f.index >= 3 && f.index <= 7);
+  assert.ok(spinnerShown, `picked ${picked.map((f) => `${f.index}:${f.reasons}`).join(" ")}`);
+  assert.ok(
+    picked.some((f) => f.reasons.includes("change-onset")),
+    "and says why it was chosen"
+  );
+});

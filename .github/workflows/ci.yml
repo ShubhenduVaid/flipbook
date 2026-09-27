@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: unit tests and manifest lint
+    name: unit tests, protocol suite and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,11 +18,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      # ffmpeg-static's postinstall downloads a platform binary that the unit tests
-      # never invoke — they run entirely on synthetic pixel buffers. Skipping scripts
-      # keeps CI fast and offline-safe.
+      # With scripts, so ffmpeg-static's postinstall fetches its binary: the protocol
+      # suite below runs the real analysis pipeline on a synthetic fixture.
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Lint
         run: npm run lint
@@ -30,17 +29,43 @@ jobs:
       - name: Lint manifests
         run: npm run lint:manifests
 
-      # Deliberately unit-only. The recording and analysis harnesses need macOS 15+,
-      # Chrome, and a granted Screen Recording permission, none of which exist on a
-      # CI runner; they are documented as local checks in the README instead.
       - name: Unit tests
         run: npm test
+
+      # The full MCP round trip — tool discovery, doctor, analyze_recording, get_frames,
+      # crops, prune — against a fixture drawn by ffmpeg, so no browser is needed. It
+      # also asserts the spinner and the vanished toast are among the frames selected.
+      # Recording itself needs macOS 15+, Chrome and Screen Recording permission, so
+      # test:e2e stays a local check.
+      - name: MCP protocol suite
+        run: npm run test:mcp
 
       # The rubric's mechanical criteria: naming, security, dead exports, docs.
       # Criteria that need macOS, Chrome or Screen Recording permission report MANUAL
       # rather than silently passing.
       - name: Validation rubric
         run: npm run validate
+
+  # Analysis is meant to work on every platform, not just the one that records. These
+  # run the same protocol suite — the real server, ffmpeg and all — on Windows and macOS.
+  cross-platform:
+    name: protocol suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:mcp
 
   swift:
     name: native recorder compiles
