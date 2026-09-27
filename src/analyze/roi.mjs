@@ -19,7 +19,8 @@ import { resizeGray } from "./delta.mjs";
  */
 export const ROI_DEFAULTS = {
   pixelThreshold: 12, // matches changedFraction's threshold in delta.mjs
-  minHitPairs: 2, // a pixel must move in at least this many frame pairs to be signal
+  minHitPairs: 2, // a pixel must move in at least this many frame pairs to be signal…
+  minClusterNeighbours: 5, // …or move once with at least this many of its 8 neighbours
   repaintGuard: 0.6, // ignore pairs where more than this much of the frame moved
   padFraction: 0.06, // pad each side by this fraction of the frame
   minSide: 0.1, // never produce a box narrower than this fraction of a dimension
@@ -70,11 +71,28 @@ export function changeBox(scored, opts = ROI_DEFAULTS) {
   let minY = SAMPLE_H;
   let maxX = -1;
   let maxY = -1;
+  // Requiring more than one hit keeps compression noise out of the box, but on its own
+  // it also kept out every state that is reached once and then holds — a confirmation
+  // panel appears in exactly one frame pair — so a crop cut the bottom rows off the
+  // result it was meant to frame. Noise is speckle and a panel is a block, so a single
+  // hit counts when most of its neighbours were hit too.
+  const hitOnceInCluster = (x, y) => {
+    if (x === 0 || y === 0 || x === SAMPLE_W - 1 || y === SAMPLE_H - 1) return false;
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if ((dx || dy) && mask[(y + dy) * SAMPLE_W + x + dx] > 0) n++;
+      }
+    }
+    return n >= opts.minClusterNeighbours;
+  };
+
   let hitPixels = 0;
   for (let y = 0; y < SAMPLE_H; y++) {
     for (let x = 0; x < SAMPLE_W; x++) {
-      // Requiring more than one hit is what keeps compression noise out of the box.
-      if (mask[y * SAMPLE_W + x] < opts.minHitPairs) continue;
+      const hits = mask[y * SAMPLE_W + x];
+      if (hits === 0) continue;
+      if (hits < opts.minHitPairs && !hitOnceInCluster(x, y)) continue;
       hitPixels++;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
